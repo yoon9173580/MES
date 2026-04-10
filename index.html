@@ -141,11 +141,12 @@ function render(py) {
 async function loadData() {
   const fetchStart = performance.now();
   try { 
-    // 브라우저 캐시를 무시하고 data.json을 직접 로드합니다 (디스크 동기화 방식)
-    const r = await fetch("data.json", {cache: "no-store"}); 
+    // Vercel: /api/data 서버리스 함수 우선, 실패 시 data.json 폴백
+    let r = await fetch("/api/data", {cache: "no-store"});
+    if (!r.ok) r = await fetch("data.json", {cache: "no-store"});
     if(r.ok) {
       const data = await r.json();
-      data.latency_ms = Math.round(data.latency_ms + (performance.now() - fetchStart)); 
+      data.latency_ms = Math.round((data.latency_ms || 0) + (performance.now() - fetchStart)); 
       render(data); 
     } 
   } catch(e) {

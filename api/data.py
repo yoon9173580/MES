@@ -1,10 +1,30 @@
 from http.server import BaseHTTPRequestHandler
 import json
+import os
 import yfinance as yf
 import pandas as pd
 import time
 from datetime import datetime
 import pytz
+
+STARTING_BALANCE = 2000.0
+
+def load_portfolio():
+    """Load paper portfolio from environment or return default."""
+    try:
+        raw = os.getenv("PAPER_PORTFOLIO", "")
+        if raw:
+            return json.loads(raw)
+    except:
+        pass
+    return {
+        "cash": STARTING_BALANCE,
+        "positions": {},
+        "history": [],
+        "initial_balance": STARTING_BALANCE,
+        "current_value": STARTING_BALANCE,
+        "total_return_pct": 0.0
+    }
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -28,9 +48,12 @@ class handler(BaseHTTPRequestHandler):
             vwap, vol_r, d_range = 0.0, 0.0, 0.0
             if not spy_h.empty:
                 tp = (spy_h["High"] + spy_h["Low"] + spy_h["Close"]) / 3.0
-                vwap = float(((spy_h["Volume"] * tp).cumsum() / spy_h["Volume"].cumsum()).iloc[-1])
+                cum_vol = spy_h["Volume"].cumsum()
+                cum_vol = cum_vol.replace(0, pd.NA)
+                vwap = float(((spy_h["Volume"] * tp).cumsum() / cum_vol).iloc[-1])
                 vol_sma = spy_h["Volume"].rolling(window=20).mean()
-                vol_r = float(spy_h["Volume"].iloc[-1] / vol_sma.iloc[-1]) if not vol_sma.empty else 0.0
+                if not vol_sma.empty and pd.notna(vol_sma.iloc[-1]) and vol_sma.iloc[-1] > 0:
+                    vol_r = float(spy_h["Volume"].iloc[-1] / vol_sma.iloc[-1])
                 d_range = float(spy_h["High"].max() - spy_h["Low"].min())
 
             t_min = now.hour * 60 + now.minute
@@ -51,23 +74,33 @@ class handler(BaseHTTPRequestHandler):
             }
 
             latency = round((time.perf_counter() - start_time) * 1000, 1)
+
+            gme_data = {s: {"price": float(tickers.tickers[s].fast_info.last_price), "pct": (float(tickers.tickers[s].fast_info.last_price / tickers.tickers[s].fast_info.previous_close)-1)*100} for s in GME_STOCK}
+
+            portfolio = load_portfolio()
+
             final = {
                 "last_updated": ts, "fetch_status": "SUCCESS", "latency_ms": latency,
                 "verdict": "STRONG GO" if all(r["ok"] for r in rules.values()) else "WAITING",
                 "rules": rules,
                 "indices": {s: {"price": float(tickers.tickers[s].fast_info.last_price), "pct": (float(tickers.tickers[s].fast_info.last_price / tickers.tickers[s].fast_info.previous_close)-1)*100} for s in INDICES},
                 "mag7": {s: {"price": float(tickers.tickers[s].fast_info.last_price), "pct": (float(tickers.tickers[s].fast_info.last_price / tickers.tickers[s].fast_info.previous_close)-1)*100} for s in MAG7},
-                "gme_data": {s: {"price": float(tickers.tickers[s].fast_info.last_price), "pct": (float(tickers.tickers[s].fast_info.last_price / tickers.tickers[s].fast_info.previous_close)-1)*100} for s in GME_STOCK}
+                "gme_data": gme_data,
+                "special_watch": gme_data,
+                "paper_trading": portfolio
             }
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.end_headers()
             self.wfile.write(json.dumps(final).encode('utf-8'))
 
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+
