@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arun AI Master Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #0c0d12; --surface: #14161f; --border: #252836; --muted: #8b90a1; --text: #e8eaf0; --go: #3dd68c; --stop: #f07178; --warn: #f5c451; --info: #82aaff; }
+body { background: var(--bg); color: var(--text); font-family: "DM Sans", sans-serif; padding: 1rem; margin: 0; }
+.wrap { max-width: 1000px; margin: 0 auto; }
+.status-bar { display: flex; justify-content: space-between; align-items: center; background: #08090d; border: 1px solid var(--border); padding: 0.6rem 1rem; border-radius: 10px; margin-bottom: 1rem; font-size: 0.75rem; font-family: "JetBrains Mono", monospace; }
+.pulse-dot { width: 7px; height: 7px; background: var(--go); border-radius: 50%; box-shadow: 0 0 8px var(--go); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* 애니메이션 효과 */
+@keyframes flash-up { 0% { background: rgba(61,214,140,0.3); } 100% { background: var(--surface); } }
+@keyframes flash-down { 0% { background: rgba(240,113,120,0.3); } 100% { background: var(--surface); } }
+.animate-up { animation: flash-up 0.8s ease-out; }
+.animate-down { animation: flash-down 0.8s ease-out; }
+
+.rule-list { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.2rem; }
+.rule-item { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #1f222e; font-size: 0.85rem; }
+.badge { font-family: "JetBrains Mono", monospace; font-size: 0.7rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px; min-width: 55px; text-align: center; }
+.pass { background: rgba(61,214,140,0.15); color: var(--go); } .fail { background: rgba(240,113,120,0.15); color: var(--stop); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.8rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; transition: background 0.5s; }
+.section-title { font-size: 0.7rem; color: var(--info); letter-spacing: 0.15em; margin: 1.5rem 0 0.8rem; text-transform: uppercase; font-weight: 700; }
+
+/* 화려한 UI 네온 효과 추가 */
+.verdict-box { background: var(--surface); border: 2px solid var(--border); border-radius: 20px; padding: 1.5rem; text-align: center; margin-bottom: 1.2rem; box-shadow: 0 0 25px rgba(61, 214, 140, 0.15); position: relative; overflow: hidden; }
+#vMain { font-size:2.8rem; font-weight:800; text-shadow: 0 0 15px currentColor; letter-spacing: 2px; }
+#vReason { color:var(--muted); font-size:0.9rem; margin-top:0.4rem; }
+.card span { text-shadow: 0 0 8px rgba(255, 255, 255, 0.2); }
+.up { color: var(--go); text-shadow: 0 0 12px rgba(61, 214, 140, 0.6); } 
+.down { color: var(--stop); text-shadow: 0 0 12px rgba(240, 113, 120, 0.6); }
+
+/* Paper Trading UI */
+.pt-box { background: linear-gradient(145deg, #1a1c26 0%, #11131a 100%); border: 1px solid #32364a; border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.pt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #252836; padding-bottom: 0.8rem; }
+.pt-title { font-size: 0.8rem; color: #b1b5c4; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.pt-title::before { content: ''; display: inline-block; width: 8px; height: 8px; background: var(--info); border-radius: 50%; box-shadow: 0 0 8px var(--info); }
+.pt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; }
+.pt-stat { display: flex; flex-direction: column; gap: 0.3rem; }
+.pt-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.pt-value { font-size: 1.4rem; font-weight: 700; font-family: "JetBrains Mono", monospace; }
+.pt-positions { margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed #252836; font-family: "JetBrains Mono", monospace; font-size: 0.8rem; color: #a0a5b5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="status-bar">
+    <div style="display:flex; align-items:center; gap:8px"><div class="pulse-dot"></div><span>BOT LIVE</span></div>
+    <div style="color:var(--muted)">SYNC: <span id="syncTime">--</span> | LATENCY: <span id="latency">--</span></div>
+  </div>
+  <div class="verdict-box">
+    <div id="vMain">LOADING</div>
+    <div id="vReason">Connecting...</div>
+  </div>
+  
+  <div class="pt-box" id="paperTradingWidget" style="display: none;">
+    <div class="pt-header">
+      <div class="pt-title">Paper Trading Bot</div>
+      <div id="ptReturn" class="badge" style="font-size: 0.8rem;">--</div>
+    </div>
+    <div class="pt-grid">
+      <div class="pt-stat">
+        <span class="pt-label">Account Value</span>
+        <span class="pt-value" id="ptValue">--</span>
+      </div>
+      <div class="pt-stat">
+        <span class="pt-label">Target Asset</span>
+        <span class="pt-value" style="color: var(--info)">SPY</span>
+      </div>
+      <div class="pt-stat">
+        <span class="pt-label">Available Cash</span>
+        <span class="pt-value" id="ptCash">--</span>
+      </div>
+    </div>
+    <div class="pt-positions" id="ptPositions">No active positions.</div>
+  </div>
+  <div class="rule-list">
+    <div class="section-title">Compliance Checklist</div>
+    <div class="rule-item"><span>VIX (14+)</span><div><span id="vixVal" style="font-weight:700; margin-right:10px;">--</span><span id="vixBadge" class="badge">--</span></div></div>
+    <div class="rule-item"><span>Range ($3+)</span><div><span id="rangeVal" style="font-weight:700; margin-right:10px;">--</span><span id="rangeBadge" class="badge">--</span></div></div>
+    <div class="rule-item"><span>Window</span><div><span id="winVal" style="font-weight:700; margin-right:10px;">--</span><span id="winBadge" class="badge">--</span></div></div>
+    <div class="rule-item"><span>VWAP Dist.</span><div><span id="vwapVal" style="font-weight:700; margin-right:10px;">--</span><span id="vwapBadge" class="badge">--</span></div></div>
+    <div class="rule-item"><span>Volume (1.5x)</span><div><span id="volVal" style="font-weight:700; margin-right:10px;">--</span><span id="volBadge" class="badge">--</span></div></div>
+    <div class="rule-item"><span>Sector Sync</span><div><span id="sectorVal" style="font-weight:700; margin-right:10px;">--</span><span id="sectorBadge" class="badge">--</span></div></div>
+  </div>
+  <div class="section-title">Major Indices</div>
+  <div id="indicesGrid" class="grid"></div>
+  <div class="section-title">Magnificent 7</div>
+  <div id="mag7Grid" class="grid"></div>
+  <div class="section-title">Alpha Watchlist</div>
+  <div id="gmeGrid" class="grid"></div>
+</div>
+<script>
+let lastPrices = {};
+
+function render(py) {
+  document.getElementById("syncTime").textContent = py.last_updated + " ET";
+  document.getElementById("latency").textContent = py.latency_ms + "ms";
+  
+  const vm = document.getElementById("vMain");
+  vm.textContent = py.verdict;
+  vm.style.color = py.verdict === "STRONG GO" ? "var(--go)" : "var(--warn)";
+
+  // 규칙 검사 매핑
+  const ruleMap = { vix: "vix", range: "range", window: "win", vwap: "vwap", vol: "vol", sector: "sector" };
+  Object.keys(ruleMap).forEach(key => {
+    const htmlId = ruleMap[key];
+    const rule = py.rules[key];
+    document.getElementById(htmlId + "Val").textContent = rule?.val || "--";
+    const b = document.getElementById(htmlId + "Badge");
+    b.textContent = rule?.ok ? "PASS" : "FAIL";
+    b.className = "badge " + (rule?.ok ? "pass" : "fail");
+  });
+
+  // 그리드 렌더링 함수
+  const renderGrid = (id, data) => {
+    if(!data) return;
+    const grid = document.getElementById(id);
+    grid.innerHTML = Object.entries(data).map(([sym, d]) => {
+      const p = d.price; const old = lastPrices[sym];
+      let anim = ""; if(old && p > old) anim="animate-up"; else if(old && p < old) anim="animate-down";
+      lastPrices[sym] = p;
+      return `<div class="card ${anim}"><div style="font-size:0.65rem; color:var(--muted)">${sym}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.4rem">
+        <span style="font-weight:700; font-family:'JetBrains Mono'">$${p.toFixed(2)}</span>
+        <span class="${d.pct>=0?'up':'down'}" style="font-size:0.85rem; font-weight:700">${(d.pct>=0?'+':'')+d.pct.toFixed(2)}%</span></div></div>`;
+    }).join("");
+  };
+  
+  renderGrid("indicesGrid", py.indices); 
+  renderGrid("mag7Grid", py.mag7);
+  renderGrid("gmeGrid", py.gme_data);
+}
+
+// 자동 새로고침 및 실제 레이턴시 측정 로직
+async function loadData() {
+  const fetchStart = performance.now();
+  try { 
+    // 브라우저 캐시를 무시하고 data.json을 직접 로드합니다 (디스크 동기화 방식)
+    const r = await fetch("data.json", {cache: "no-store"}); 
+    if(r.ok) {
+      const data = await r.json();
+      data.latency_ms = Math.round(data.latency_ms + (performance.now() - fetchStart)); 
+      render(data); 
+    } 
+  } catch(e) {
+    console.error("데이터 통신 에러:", e);
+  }
+  setTimeout(loadData, 15000);
+}
+
+loadData();
+</script>
+</body>
+</html>
+

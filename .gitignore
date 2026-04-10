@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and state files
+data.json
+state.json
+paper_portfolio.json
+
+# Environments
+.venv/
+venv/
+ENV/
+env.bak
+env/
+.env
+
+# IDEs
+.vscode/
+.idea/

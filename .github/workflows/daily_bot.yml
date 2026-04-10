@@ -1,0 +1,32 @@
+name: Daily 0DTE Turbo Bot
+
+on:
+  workflow_dispatch: 
+  schedule:
+    - cron: '* 13-21 * * 1-5' 
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: 라이브러리 설치 (에러 해결)
+        run: pip install pandas pytz requests yfinance pandas_market_calendars
+      - name: 봇 실행
+        env:
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+          TWELVE_DATA_KEY: ${{ secrets.TWELVE_DATA_KEY }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: python find_trigger.py
+      - name: 결과 업데이트
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "action@github.com"
+          git add data.json 
+          git commit -m "Turbo Update: $(date)" || echo "No changes"
+          git push
