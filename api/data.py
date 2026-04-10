@@ -79,9 +79,23 @@ class handler(BaseHTTPRequestHandler):
 
             portfolio = load_portfolio()
 
+            failed = [name for name, r in rules.items() if not r["ok"]]
+            passed_count = len(rules) - len(failed)
+            confidence = int((passed_count / max(len(rules), 1)) * 100)
+
+            if confidence == 100:
+                verdict = "STRONG GO"
+                reason = "All conditions satisfied"
+            elif confidence >= 60:
+                verdict = "WAITING"
+                reason = "Waiting: " + ", ".join(failed)
+            else:
+                verdict = "STOP"
+                reason = "Weak conditions: " + ", ".join(failed)
+
             final = {
                 "last_updated": ts, "fetch_status": "SUCCESS", "latency_ms": latency,
-                "verdict": "STRONG GO" if all(r["ok"] for r in rules.values()) else "WAITING",
+                "verdict": verdict, "confidence": confidence, "reason": reason,
                 "rules": rules,
                 "indices": {s: {"price": float(tickers.tickers[s].fast_info.last_price), "pct": (float(tickers.tickers[s].fast_info.last_price / tickers.tickers[s].fast_info.previous_close)-1)*100} for s in INDICES},
                 "mag7": {s: {"price": float(tickers.tickers[s].fast_info.last_price), "pct": (float(tickers.tickers[s].fast_info.last_price / tickers.tickers[s].fast_info.previous_close)-1)*100} for s in MAG7},
