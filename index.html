@@ -104,13 +104,21 @@ function render(py) {
   
   const vm = document.getElementById("vMain");
   vm.textContent = py.verdict;
-  vm.style.color = py.verdict === "STRONG GO" ? "var(--go)" : "var(--warn)";
+  if (py.verdict === "STRONG GO") vm.style.color = "var(--go)";
+  else if (py.verdict === "STOP") vm.style.color = "var(--stop)";
+  else vm.style.color = "var(--warn)";
+
+  // Update reason text
+  const vr = document.getElementById("vReason");
+  if (py.reason) vr.textContent = py.reason;
+  else if (py.briefing) vr.textContent = py.briefing;
+  else vr.textContent = py.fetch_status || "Connected";
 
   // 규칙 검사 매핑
   const ruleMap = { vix: "vix", range: "range", window: "win", vwap: "vwap", vol: "vol", sector: "sector" };
   Object.keys(ruleMap).forEach(key => {
     const htmlId = ruleMap[key];
-    const rule = py.rules[key];
+    const rule = py.rules ? py.rules[key] : null;
     document.getElementById(htmlId + "Val").textContent = rule?.val || "--";
     const b = document.getElementById(htmlId + "Badge");
     b.textContent = rule?.ok ? "PASS" : "FAIL";
@@ -134,7 +142,42 @@ function render(py) {
   
   renderGrid("indicesGrid", py.indices); 
   renderGrid("mag7Grid", py.mag7);
-  renderGrid("gmeGrid", py.gme_data);
+  renderGrid("gmeGrid", py.gme_data || py.special_watch);
+
+  // Paper Trading UI
+  if (py.paper_trading) {
+    document.getElementById("paperTradingWidget").style.display = "block";
+    const pt = py.paper_trading;
+    document.getElementById("ptValue").textContent = "$" + pt.current_value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    document.getElementById("ptCash").textContent = "$" + pt.cash.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    
+    const retBadge = document.getElementById("ptReturn");
+    const retPct = pt.total_return_pct;
+    retBadge.textContent = (retPct >= 0 ? "+" : "") + retPct.toFixed(2) + "% All Time";
+    retBadge.className = "badge " + (retPct >= 0 ? "pass" : "fail");
+
+    let posHtml = "";
+    if (pt.positions) {
+      Object.entries(pt.positions).forEach(([sym, data]) => {
+        if (data.shares > 0) {
+          let currentP = 0;
+          if (py.indices && py.indices[sym]) currentP = py.indices[sym].price;
+          else if (py.mag7 && py.mag7[sym]) currentP = py.mag7[sym].price;
+          
+          let pnlStr = "";
+          if (currentP > 0) {
+             const pnl = (currentP - data.avg_price) * data.shares;
+             const pnlPct = ((currentP / data.avg_price) - 1) * 100;
+             const clr = pnl >= 0 ? "var(--go)" : "var(--stop)";
+             const sign = pnl >= 0 ? "+" : "";
+             pnlStr = ` | PnL: <span style="color:${clr}">${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(2)}%)</span>`;
+          }
+          posHtml += `<div>[HOLDING] ${data.shares}x ${sym} @ $${data.avg_price.toFixed(2)}${pnlStr}</div>`;
+        }
+      });
+    }
+    document.getElementById("ptPositions").innerHTML = posHtml || "No active positions.";
+  }
 }
 
 // 자동 새로고침 및 실제 레이턴시 측정 로직
@@ -150,7 +193,7 @@ async function loadData() {
       render(data); 
     } 
   } catch(e) {
-    console.error("데이터 통신 에러:", e);
+    console.error("Data fetch error:", e);
   }
   setTimeout(loadData, 15000);
 }
