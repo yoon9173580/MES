@@ -2,6 +2,7 @@
 Vercel Serverless API — /api/data
 SPY 0DTE Signal Machine — 7-Layer Score Engine
 """
+import math
 from http.server import BaseHTTPRequestHandler
 import json
 import os
@@ -98,6 +99,135 @@ def _signal_grade(score):
     elif score >= 75: return {"grade": "MODERATE", "label": "MODERATE SIGNAL", "emoji": "🟡", "action": "Half position", "color": "#f5c451"}
     elif score >= 60: return {"grade": "WEAK", "label": "STANDBY", "emoji": "🟠", "action": "Monitor only", "color": "#f5a623"}
     else: return {"grade": "NONE", "label": "NO SIGNAL", "emoji": "🔴", "action": "No entry", "color": "#f07178"}
+
+
+def _calculate_strike_recommendation(spy_price, direction_bias, signal_grade,
+                                      vix_price, vwap, normalized_score,
+                                      portfolio_cash, now_et):
+    """
+    Calculate the recommended option strike to trade.
+    Returns a dict with strike details, premium estimates, and risk params.
+    """
+    if spy_price is None or direction_bias == "NEUTRAL" or signal_grade in ("NONE",):
+        return {"active": False, "reason": "No actionable signal"}
+
+    atm_strike = round(spy_price)
+
+    if signal_grade == "STRONG":
+        otm_offset = 0
+        strike_reasoning = "ATM — high conviction, all conditions met"
+    elif signal_grade == "MODERATE":
+        otm_offset = 1
+        strike_reasoning = "OTM-1 — balanced cost/probability"
+    else:
+        otm_offset = 2
+        strike_reasoning = "OTM-2 — monitor zone, low cost entry"
+
+    if direction_bias == "CALL":
+        recommended_strike = atm_strike + otm_offset
+        otm_1 = atm_strike + 1
+        otm_2 = atm_strike + 2
+        contract_type = "C"
+        type_label = "CALL"
+    else:
+        recommended_strike = atm_strike - otm_offset
+        otm_1 = atm_strike - 1
+        otm_2 = atm_strike - 2
+        contract_type = "P"
+        type_label = "PUT"
+
+    contract_label = f"SPY ${recommended_strike}{contract_type} 0DTE"
+
+    # Try real option chain from yfinance
+    real_bid, real_ask, real_last, chain_success = None, None, None, False
+    try:
+        spy_ticker = yf.Ticker("SPY")
+        exp_dates = spy_ticker.options
+        today_str = now_et.strftime("%Y-%m-%d")
+        target_exp = None
+        for exp in exp_dates:
+            if exp >= today_str:
+                target_exp = exp
+                break
+        if target_exp:
+            chain = spy_ticker.option_chain(target_exp)
+            opt_df = chain.calls if direction_bias == "CALL" else chain.puts
+            match = opt_df[opt_df["strike"] == float(recommended_strike)]
+            if not match.empty:
+                row = match.iloc[0]
+                real_bid = float(row.get("bid", 0))
+                real_ask = float(row.get("ask", 0))
+                real_last = float(row.get("lastPrice", 0))
+                chain_success = True
+    except:
+        pass
+
+    if chain_success and real_bid and real_ask and real_bid > 0:
+        est_premium_low = round(real_bid, 2)
+        est_premium_high = round(real_ask, 2)
+        mid_premium = round((real_bid + real_ask) / 2, 2)
+        data_source = "LIVE"
+    else:
+        vix_val = vix_price if vix_price else 18.0
+        time_factor = math.sqrt(1.0 / 365.0)
+        atm_est = spy_price * (vix_val / 100.0) * time_factor * 0.5
+        otm_discount = max(0.3, 1.0 - (otm_offset * 0.25))
+        mid_premium = round(atm_est * otm_discount, 2)
+        est_premium_low = round(mid_premium * 0.85, 2)
+        est_premium_high = round(mid_premium * 1.15, 2)
+        data_source = "ESTIMATED"
+
+    mid_premium = max(mid_premium, 0.05)
+    est_premium_low = max(est_premium_low, 0.01)
+    est_premium_high = max(est_premium_high, 0.10)
+
+    target_pct = 50
+    stop_pct = 30
+    target_price = round(mid_premium * 1.5, 2)
+    stop_price = round(mid_premium * 0.7, 2)
+
+    risk_per = round(mid_premium * (stop_pct / 100.0), 2)
+    reward_per = round(mid_premium * (target_pct / 100.0), 2)
+    rr_ratio = round(reward_per / risk_per, 2) if risk_per > 0 else 0
+
+    max_risk_pct = 10.0
+    max_risk_dollars = round(portfolio_cash * (max_risk_pct / 100.0), 2)
+    cost_per_contract = round(mid_premium * 100, 2)
+    max_contracts = max(1, int(max_risk_dollars / cost_per_contract)) if cost_per_contract > 0 else 0
+
+    strikes = [
+        {"label": "ATM", "strike": atm_strike, "recommended": otm_offset == 0},
+        {"label": "OTM-1", "strike": otm_1, "recommended": otm_offset == 1},
+        {"label": "OTM-2", "strike": otm_2, "recommended": otm_offset == 2},
+    ]
+
+    return {
+        "active": True,
+        "direction": type_label,
+        "atm_strike": atm_strike,
+        "recommended_strike": recommended_strike,
+        "otm_offset": otm_offset,
+        "contract_label": contract_label,
+        "contract_type": contract_type,
+        "strikes": strikes,
+        "est_premium_low": est_premium_low,
+        "est_premium_high": est_premium_high,
+        "mid_premium": mid_premium,
+        "data_source": data_source,
+        "real_bid": real_bid,
+        "real_ask": real_ask,
+        "real_last": real_last,
+        "target_pct": target_pct,
+        "stop_pct": stop_pct,
+        "target_price": target_price,
+        "stop_price": stop_price,
+        "risk_reward": f"1:{rr_ratio}",
+        "max_contracts": max_contracts,
+        "cost_per_contract": cost_per_contract,
+        "max_risk_dollars": max_risk_dollars,
+        "max_risk_pct": max_risk_pct,
+        "reasoning": strike_reasoning,
+    }
 
 
 def load_portfolio():
@@ -256,6 +386,18 @@ class handler(BaseHTTPRequestHandler):
                                    "pct": (float(t.fast_info.last_price) / float(t.fast_info.previous_close) - 1) * 100}
                 except: pass
 
+            # ── STRIKE RECOMMENDATION ──
+            strike_rec = _calculate_strike_recommendation(
+                spy_price=spy_p,
+                direction_bias=direction_bias,
+                signal_grade=signal["grade"],
+                vix_price=vix_p,
+                vwap=vwap,
+                normalized_score=normalized,
+                portfolio_cash=portfolio.get("cash", STARTING_BALANCE),
+                now_et=now,
+            )
+
             final = {
                 "last_updated": ts, "fetch_status": "SUCCESS", "latency_ms": latency,
                 "session": "REGULAR" if is_regular else "CLOSED",
@@ -272,6 +414,9 @@ class handler(BaseHTTPRequestHandler):
                     "technical": technical,
                     "risk": risk,
                 },
+
+                # Strike recommendation
+                "strike_recommendation": strike_rec,
 
                 # Legacy
                 "verdict": signal["label"], "confidence": normalized, "reason": signal["action"],

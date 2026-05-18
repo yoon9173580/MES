@@ -101,6 +101,31 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 .regime-choppy{background:rgba(255,182,39,0.1);color:var(--warn);border:1px solid rgba(255,182,39,0.2)}
 .regime-breakout{background:rgba(167,139,250,0.1);color:var(--purple);border:1px solid rgba(167,139,250,0.2)}
 .regime-unknown{background:rgba(107,112,132,0.1);color:var(--muted);border:1px solid rgba(107,112,132,0.2)}
+
+/* Strike Recommendation */
+.strike-box{background:linear-gradient(145deg,rgba(16,18,32,0.95),rgba(10,12,20,0.98));backdrop-filter:blur(24px);border:1px solid rgba(167,139,250,0.2);border-radius:18px;padding:1.3rem;margin-bottom:1.2rem;position:relative;overflow:hidden}
+.strike-box::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--purple),var(--cyan),transparent)}
+.strike-box::after{content:'';position:absolute;inset:0;background:radial-gradient(circle at 80% 20%,rgba(167,139,250,0.06),transparent 60%);pointer-events:none}
+.strike-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;padding-bottom:0.7rem;border-bottom:1px solid var(--border)}
+.strike-title{font-size:0.7rem;color:var(--purple);letter-spacing:0.12em;text-transform:uppercase;font-weight:700;display:flex;align-items:center;gap:8px}
+.strike-title::before{content:'';display:inline-block;width:6px;height:6px;background:var(--purple);border-radius:50%;box-shadow:0 0 10px var(--purple);animation:pulse 1.5s infinite}
+.strike-source{font-size:0.6rem;padding:0.15rem 0.5rem;border-radius:4px;font-weight:700;letter-spacing:0.05em}
+.source-live{background:rgba(0,232,123,0.12);color:var(--go)}
+.source-est{background:rgba(255,182,39,0.12);color:var(--warn)}
+.strike-contract{text-align:center;margin-bottom:1rem}
+.strike-contract-name{font-size:1.6rem;font-weight:900;letter-spacing:1px;background:linear-gradient(135deg,var(--purple),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.strike-contract-sub{font-size:0.7rem;color:var(--muted);margin-top:4px}
+.strike-table{width:100%;margin-bottom:1rem}
+.strike-table-row{display:flex;align-items:center;padding:0.35rem 0.6rem;border-radius:6px;margin-bottom:2px;font-size:0.75rem;gap:8px}
+.strike-table-row.recommended{background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.2)}
+.strike-table-label{width:55px;color:var(--muted);font-weight:600;font-size:0.65rem;text-transform:uppercase;flex-shrink:0}
+.strike-table-val{flex:1;font-weight:700}
+.strike-table-tag{font-size:0.6rem;padding:0.1rem 0.4rem;border-radius:3px;background:rgba(167,139,250,0.15);color:var(--purple);font-weight:700;letter-spacing:0.05em}
+.strike-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0.7rem;margin-bottom:1rem}
+.strike-metric{display:flex;flex-direction:column;gap:2px;padding:0.5rem;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid var(--border)}
+.strike-metric-label{font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em}
+.strike-metric-value{font-size:1rem;font-weight:700}
+.strike-reasoning{font-size:0.72rem;color:var(--muted);padding:0.5rem 0.7rem;background:rgba(255,255,255,0.02);border-radius:8px;border-left:2px solid var(--purple);display:flex;align-items:center;gap:6px}
 </style>
 </head>
 <body>
@@ -168,6 +193,21 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 
   <!-- Briefing -->
   <div class="briefing-bar" id="briefing">Connecting to signal engine...</div>
+
+  <!-- Strike Recommendation -->
+  <div class="strike-box" id="strikeWidget" style="display:none">
+    <div class="strike-header">
+      <div class="strike-title">🎯 Strike Recommendation</div>
+      <div class="strike-source" id="strikeSource">--</div>
+    </div>
+    <div class="strike-contract">
+      <div class="strike-contract-name mono" id="strikeContractName">--</div>
+      <div class="strike-contract-sub" id="strikeContractSub">--</div>
+    </div>
+    <div class="strike-table" id="strikeTable"></div>
+    <div class="strike-metrics" id="strikeMetrics"></div>
+    <div class="strike-reasoning" id="strikeReasoning">--</div>
+  </div>
 
   <!-- Paper Trading -->
   <div class="pt-box" id="paperTradingWidget" style="display:none">
@@ -302,6 +342,62 @@ function render(py) {
 
   // Briefing
   document.getElementById('briefing').textContent = py.briefing || '--';
+
+  // Strike Recommendation
+  const sr = py.strike_recommendation;
+  const srWidget = document.getElementById('strikeWidget');
+  if (sr && sr.active) {
+    srWidget.style.display = 'block';
+    const srcEl = document.getElementById('strikeSource');
+    srcEl.textContent = sr.data_source === 'LIVE' ? 'LIVE DATA' : 'ESTIMATED';
+    srcEl.className = 'strike-source ' + (sr.data_source === 'LIVE' ? 'source-live' : 'source-est');
+
+    document.getElementById('strikeContractName').textContent = sr.contract_label;
+    const dirColor = sr.direction === 'CALL' ? 'var(--go)' : 'var(--stop)';
+    document.getElementById('strikeContractSub').innerHTML =
+      `<span style="color:${dirColor};font-weight:700">${sr.direction}</span> &bull; ` +
+      `Premium: <span class="mono" style="font-weight:700">$${sr.est_premium_low.toFixed(2)} — $${sr.est_premium_high.toFixed(2)}</span>`;
+
+    document.getElementById('strikeTable').innerHTML = (sr.strikes || []).map(s => {
+      const isRec = s.recommended;
+      return `<div class="strike-table-row ${isRec ? 'recommended' : ''}">
+        <span class="strike-table-label">${s.label}</span>
+        <span class="strike-table-val mono">$${s.strike}</span>
+        ${isRec ? '<span class="strike-table-tag">← RECOMMENDED</span>' : ''}
+      </div>`;
+    }).join('');
+
+    document.getElementById('strikeMetrics').innerHTML = `
+      <div class="strike-metric">
+        <span class="strike-metric-label">🎯 Target (+${sr.target_pct}%)</span>
+        <span class="strike-metric-value mono" style="color:var(--go)">$${sr.target_price.toFixed(2)}</span>
+      </div>
+      <div class="strike-metric">
+        <span class="strike-metric-label">🛡 Stop (-${sr.stop_pct}%)</span>
+        <span class="strike-metric-value mono" style="color:var(--stop)">$${sr.stop_price.toFixed(2)}</span>
+      </div>
+      <div class="strike-metric">
+        <span class="strike-metric-label">⚖️ Risk/Reward</span>
+        <span class="strike-metric-value mono" style="color:var(--cyan)">${sr.risk_reward}</span>
+      </div>
+      <div class="strike-metric">
+        <span class="strike-metric-label">💰 Max Contracts</span>
+        <span class="strike-metric-value mono">${sr.max_contracts}x</span>
+      </div>
+      <div class="strike-metric">
+        <span class="strike-metric-label">💵 Cost/Contract</span>
+        <span class="strike-metric-value mono">$${sr.cost_per_contract.toFixed(0)}</span>
+      </div>
+      <div class="strike-metric">
+        <span class="strike-metric-label">⚠️ Max Risk</span>
+        <span class="strike-metric-value mono" style="color:var(--warn)">$${sr.max_risk_dollars.toFixed(0)} (${sr.max_risk_pct}%)</span>
+      </div>
+    `;
+
+    document.getElementById('strikeReasoning').innerHTML = `💡 ${sr.reasoning}`;
+  } else {
+    srWidget.style.display = 'none';
+  }
 
   // Legacy Rules
   const ruleMap = {vix:'vix',range:'range',window:'win',vwap:'vwap',vol:'vol',sector:'sector'};
