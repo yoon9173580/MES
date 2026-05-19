@@ -339,7 +339,14 @@ function buildRecentTrades(pt) {
   const openLogged = new Set();
   for (const e of (pt.trade_log || [])) {
     if (e.event !== 'OPEN' && e.event !== 'CLOSE') continue;
-    rows.push({ ...e, display_status: e.event });
+    const row = { ...e, display_status: e.event };
+    if (e.event === 'CLOSE') {
+      row.realized_pnl = e.realized_pnl ?? e.pnl;
+      row.pnl_locked = true;
+      delete row.unrealized_pnl;
+      delete row.unrealized_pnl_pct;
+    }
+    rows.push(row);
     if (e.event === 'OPEN' && e.trade_id) openLogged.add(e.trade_id);
   }
   for (const p of Object.values(pt.positions || {})) {
@@ -354,7 +361,14 @@ function buildRecentTrades(pt) {
   });
   for (const h of (pt.history || [])) {
     if (hasClose(h)) continue;
-    rows.push({ ...h, display_status: 'CLOSE', event: 'CLOSE', status: 'CLOSED' });
+    rows.push({
+      ...h,
+      display_status: 'CLOSE',
+      event: 'CLOSE',
+      status: 'CLOSED',
+      realized_pnl: h.realized_pnl ?? h.pnl,
+      pnl_locked: true,
+    });
   }
   return dedupeLedgerRows(rows);
 }
@@ -363,6 +377,16 @@ function tradeStatusBadge(h) {
   const st = h.display_status || h.event || (h.status === 'OPEN' ? 'OPEN' : 'CLOSE');
   if (st === 'CLOSE' && h.exit_type) return `CLOSE · ${h.exit_type}`;
   return st;
+}
+
+function isOpenTradeRow(h) {
+  return (h.display_status || h.event) === 'OPEN' || h.status === 'OPEN';
+}
+
+function tradeRowPnl(h, isOpen) {
+  if (isOpen) return { value: h.cost || 0, label: `$${(h.cost || 0).toFixed(0)}`, isWin: null };
+  const pnl = h.realized_pnl ?? h.pnl ?? 0;
+  return { value: pnl, label: `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}`, isWin: pnl > 0 };
 }
 
 function render(py) {
@@ -549,9 +573,8 @@ function render(py) {
     const hist = buildRecentTrades(pt);
     if(hist.length > 0) {
       document.getElementById('ptHistory').innerHTML = hist.map(h => {
-        const isOpenEvent = (h.display_status || h.event) === 'OPEN' || h.status === 'OPEN';
-        const pnl = h.pnl || 0;
-        const isWin = pnl > 0;
+        const isOpenEvent = isOpenTradeRow(h);
+        const pnlRow = tradeRowPnl(h, isOpenEvent);
         const badge = tradeStatusBadge(h);
         const timeLabel = isOpenEvent
           ? (h.time || h.entry_time || '--')
@@ -565,7 +588,7 @@ function render(py) {
           </span>
           <span style="text-align:right">
             <span style="color:var(--muted);font-size:0.6rem;margin-right:6px">[${badge}]</span>
-            <span style="color:${isOpenEvent?'var(--info)':(isWin?'var(--go)':'var(--stop)')};font-weight:700">${isOpenEvent ? '$'+(h.cost||0).toFixed(0) : (isWin?'+':'')+'$'+pnl.toFixed(0)}</span>
+            <span style="color:${isOpenEvent?'var(--info)':(pnlRow.isWin?'var(--go)':'var(--stop)')};font-weight:700">${pnlRow.label}</span>
           </span>
         </div>`;
       }).join('');

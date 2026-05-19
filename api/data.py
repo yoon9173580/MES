@@ -268,15 +268,52 @@ def _trade_recency_key(item):
     return item.get("exit_ts") or item.get("entry_ts") or item.get("logged_at") or f"{item.get('date', '')} {item.get('exit_time') or item.get('entry_time') or item.get('time', '')}"
 
 
+def _is_closed_record(item):
+    return item.get("status") == "CLOSED" or item.get("event") == "CLOSE" or item.get("pnl_locked")
+
+
+def _finalize_closed_record(record):
+    """Freeze realized P&L — closed trades must never be mark-to-market again."""
+    row = dict(record)
+    row["status"] = "CLOSED"
+    row["pnl_locked"] = True
+    if row.get("pnl") is not None:
+        row["realized_pnl"] = row["pnl"]
+    for key in ("unrealized_pnl", "unrealized_pnl_pct", "mark_spy", "mark_time"):
+        row.pop(key, None)
+    return row
+
+
+def _trade_already_closed(pf, trade_id):
+    if not trade_id:
+        return False
+    for h in pf.get("history") or []:
+        if h.get("trade_id") == trade_id and _is_closed_record(h):
+            return True
+    for e in pf.get("trade_log") or []:
+        if e.get("trade_id") == trade_id and e.get("event") == "CLOSE":
+            return True
+    return False
+
+
 def _merge_trade_records(items):
-    """Merge closed trade rows by trade_id; keep the most complete / latest version."""
+    """Merge closed trades by trade_id; first locked close wins (P&L never changes)."""
     merged = {}
     for item in items:
         if not isinstance(item, dict):
             continue
         tid = item.get("trade_id") or f"{item.get('date')}-{item.get('entry_time')}-{item.get('direction')}-{item.get('K_buy')}"
+        item = _finalize_closed_record(item) if _is_closed_record(item) else dict(item)
         prev = merged.get(tid)
-        if not prev or _trade_recency_key(item) >= _trade_recency_key(prev):
+        if not prev:
+            merged[tid] = item
+            continue
+        if prev.get("pnl_locked"):
+            continue
+        if item.get("pnl_locked"):
+            merged[tid] = item
+            continue
+        if _trade_recency_key(item) >= _trade_recency_key(prev):
             merged[tid] = item
     return sorted(merged.values(), key=_trade_recency_key, reverse=True)
 
@@ -344,12 +381,20 @@ def _has_close_row(rows, record):
 
 
 def _append_history(pf, record):
+    if _is_closed_record(record):
+        if _trade_already_closed(pf, record.get("trade_id")):
+            return
+        record = _finalize_closed_record(record)
     hist = pf.setdefault("history", [])
     hist.insert(0, record)
     pf["history"] = _cap_list(hist)
 
 
 def _append_trade_event(pf, event):
+    if event.get("event") == "CLOSE":
+        if _trade_already_closed(pf, event.get("trade_id")):
+            return
+        event = _finalize_closed_record(event)
     log = pf.setdefault("trade_log", [])
     event["logged_at"] = datetime.now(NY).strftime("%Y-%m-%d %H:%M:%S")
     log.insert(0, event)
@@ -365,7 +410,7 @@ def _build_recent_trades(pf):
         ev = e.get("event")
         if ev not in ("OPEN", "CLOSE"):
             continue
-        row = dict(e)
+        row = _finalize_closed_record(e) if ev == "CLOSE" else dict(e)
         row["display_status"] = ev
         if ev == "OPEN" and row.get("trade_id"):
             open_logged.add(row["trade_id"])
@@ -384,10 +429,9 @@ def _build_recent_trades(pf):
     for h in pf.get("history") or []:
         if _has_close_row(rows, h):
             continue
-        row = dict(h)
+        row = _finalize_closed_record(h)
         row["display_status"] = "CLOSE"
         row["event"] = "CLOSE"
-        row["status"] = "CLOSED"
         rows.append(row)
 
     return _cap_list(_dedupe_ledger_rows(rows))
@@ -408,9 +452,13 @@ def _close_trade(pos, now, spy_p, exit_val, exit_type):
         "exit_type": exit_type,
         "revenue": revenue,
         "pnl": pnl,
+        "realized_pnl": pnl,
         "pnl_pct": pnl_pct,
+        "pnl_locked": True,
         "win": pnl > 0,
     })
+    for key in ("unrealized_pnl", "unrealized_pnl_pct", "mark_spy", "mark_time"):
+        pos.pop(key, None)
     return pos
 
 
@@ -448,6 +496,10 @@ def _position_invalid_reason(open_pos, grade, direction_bias, score_result):
 
 
 def _record_position_close(portfolio, open_pos, today_str, now, spy_p, exit_val, exit_type):
+    if _trade_already_closed(portfolio, open_pos.get("trade_id")):
+        if today_str in portfolio.get("positions", {}):
+            del portfolio["positions"][today_str]
+        return
     open_pos = _close_trade(open_pos, now, spy_p, exit_val, exit_type)
     portfolio["cash"] += open_pos["revenue"]
     _append_history(portfolio, open_pos.copy())
@@ -486,7 +538,9 @@ def save_portfolio(pf):
         if not pf.get("history") and remote_pf.get("history"):
             pf["history"] = remote_pf["history"]
         else:
-            pf["history"] = _cap_list(merged_history)
+            pf["history"] = _cap_list([
+                _finalize_closed_record(h) if _is_closed_record(h) else h for h in merged_history
+            ])
         if not pf.get("trade_log") and remote_pf.get("trade_log"):
             pf["trade_log"] = remote_pf["trade_log"]
         else:
@@ -498,7 +552,7 @@ def save_portfolio(pf):
         pf["recent_trades"] = _build_recent_trades(pf)
         pf["current_value"] = pf["cash"]
         for p in pf.get("positions", {}).values():
-            pf["current_value"] += p.get("cost", 0)
+            pf["current_value"] += float(p.get("cost", 0) or 0) + float(p.get("unrealized_pnl", 0) or 0)
         pf["total_return_pct"] = round(((pf["current_value"] / pf["initial_balance"]) - 1) * 100, 2)
         pf["revision"] = int(remote_pf.get("revision", 0) or 0) + 1
         pf["last_saved"] = datetime.now(NY).strftime("%Y-%m-%d %H:%M:%S")
@@ -607,22 +661,34 @@ class handler(BaseHTTPRequestHandler):
             
             # 1. Clean up stale positions from previous days
             to_remove = []
-            for date_key, pos in portfolio.get("positions", {}).items():
-                if date_key != today_str:
-                    pos = _close_trade(pos, now, 0, 0, "STALE_EOD")
-                    _append_history(portfolio, pos)
-                    _append_trade_event(portfolio, {
-                        "event": "CLOSE",
-                        "trade_id": pos.get("trade_id"),
-                        "date": pos.get("date"),
-                        "direction": pos.get("direction"),
-                        "K_buy": pos.get("K_buy"),
-                        "K_sell": pos.get("K_sell"),
-                        "exit_type": pos.get("exit_type"),
-                        "pnl": pos.get("pnl"),
-                        "pnl_pct": pos.get("pnl_pct"),
-                    })
+            for date_key, pos in list(portfolio.get("positions", {}).items()):
+                if date_key == today_str:
+                    continue
+                tid = pos.get("trade_id")
+                if _trade_already_closed(portfolio, tid):
                     to_remove.append(date_key)
+                    continue
+                pos = _close_trade(pos, now, spy_p, 0, "STALE_EOD")
+                portfolio["cash"] += pos["revenue"]
+                _append_history(portfolio, pos)
+                _append_trade_event(portfolio, {
+                    "event": "CLOSE",
+                    "trade_id": tid,
+                    "date": pos.get("date"),
+                    "entry_time": pos.get("entry_time"),
+                    "exit_time": pos.get("exit_time"),
+                    "direction": pos.get("direction"),
+                    "K_buy": pos.get("K_buy"),
+                    "K_sell": pos.get("K_sell"),
+                    "exit_type": pos.get("exit_type"),
+                    "cost": pos.get("cost"),
+                    "revenue": pos.get("revenue"),
+                    "pnl": pos.get("pnl"),
+                    "realized_pnl": pos.get("realized_pnl"),
+                    "pnl_pct": pos.get("pnl_pct"),
+                    "win": pos.get("win"),
+                })
+                to_remove.append(date_key)
             if to_remove:
                 for k in to_remove: del portfolio["positions"][k]
 
