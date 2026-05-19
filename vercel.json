@@ -9,5 +9,11 @@
       "src": "index.html",
       "use": "@vercel/static"
     }
+  ],
+  "routes": [
+    {
+      "src": "/api/data",
+      "dest": "/api/data.py"
+    }
   ]
 }

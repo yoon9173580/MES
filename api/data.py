@@ -26,8 +26,8 @@ def bs_price(S, K, T, r, sigma, opt="call"):
 
 ALPACA_DATA_URL = "https://data.alpaca.markets"
 ALPACA_HEADERS = {
-    "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID", "PKDXLOBHUXF3KRXAE7AR7G532R"),
-    "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY", "EHC9XzN6j51YY5jS8EExDvAzsZXP9aRobSdr4cjREM3f"),
+    "APCA-API-KEY-ID": os.getenv("APCA_API_KEY_ID", ""),
+    "APCA-API-SECRET-KEY": os.getenv("APCA_API_SECRET_KEY", ""),
 }
 
 
