@@ -283,8 +283,33 @@ def _storage_backend():
     return "restful"
 
 
+LOCAL_PORTFOLIO_FILE = "portfolio.json"
+
+def _fetch_local_portfolio():
+    if os.path.exists(LOCAL_PORTFOLIO_FILE):
+        try:
+            with open(LOCAL_PORTFOLIO_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and "cash" in data:
+                    return data
+        except Exception:
+            pass
+    return None
+
+def _write_local_portfolio(pf):
+    payload_pf = {
+        k: v for k, v in pf.items()
+        if not str(k).startswith("_") and k != "recent_trades"
+    }
+    try:
+        with open(LOCAL_PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload_pf, f, cls=SafeEncoder, indent=2)
+        return True
+    except Exception:
+        return False
+
 def _fetch_raw_portfolio(retries=3):
-    """Load portfolio JSON from persistent storage with retries."""
+    """Load portfolio JSON from persistent storage with retries, falling back to local file."""
     for attempt in range(retries):
         try:
             if _storage_backend() == "upstash":
@@ -301,6 +326,7 @@ def _fetch_raw_portfolio(retries=3):
                         data = json.loads(raw) if isinstance(raw, str) else raw
                         if isinstance(data, dict) and "cash" in data:
                             data["_storage"] = "upstash"
+                            _write_local_portfolio(data)
                             return data
             else:
                 r = requests.get(RESTFUL_KV_URL, timeout=6)
@@ -308,22 +334,17 @@ def _fetch_raw_portfolio(retries=3):
                     data = r.json().get("data", {})
                     if isinstance(data, dict) and "cash" in data:
                         data["_storage"] = "restful"
+                        _write_local_portfolio(data)
                         return data
         except Exception:
             pass
         time.sleep(0.15 * (attempt + 1))
     
-    # Fallback to local file if remote storage fails
-    try:
-        if os.path.exists("paper_portfolio.json"):
-            with open("paper_portfolio.json", "r") as f:
-                data = json.load(f)
-                if isinstance(data, dict) and "cash" in data:
-                    data["_storage"] = "local"
-                    return data
-    except Exception:
-        pass
-    
+    # Fallback to local copy
+    local_data = _fetch_local_portfolio()
+    if local_data:
+        local_data["_storage"] = "local_file"
+        return local_data
     return None
 
 
@@ -333,13 +354,18 @@ def _write_raw_portfolio(pf):
         k: v for k, v in pf.items()
         if not str(k).startswith("_") and k != "recent_trades"
     }
+    # Always write locally first to guarantee persistence
+    local_ok = _write_local_portfolio(pf)
+    
     body = json.loads(json.dumps({"name": PORTFOLIO_STORAGE_KEY, "data": payload_pf}, cls=SafeEncoder))
 
-    if _storage_backend() == "upstash":
-        base = os.getenv("KV_REST_API_URL", "").rstrip("/")
-        token = os.getenv("KV_REST_API_TOKEN", "")
-        raw = json.dumps(payload_pf, cls=SafeEncoder)
-        try:
+    remote_ok = False
+    last_err = None
+    try:
+        if _storage_backend() == "upstash":
+            base = os.getenv("KV_REST_API_URL", "").rstrip("/")
+            token = os.getenv("KV_REST_API_TOKEN", "")
+            raw = json.dumps(payload_pf, cls=SafeEncoder)
             r = requests.post(
                 f"{base}/set/{PORTFOLIO_STORAGE_KEY}",
                 data=raw,
@@ -347,33 +373,32 @@ def _write_raw_portfolio(pf):
                 timeout=10,
             )
             r.raise_for_status()
-            return True
-        except Exception as e:
-            # Fallback to local file if Upstash fails
-            try:
-                with open("paper_portfolio.json", "w") as f:
-                    json.dump(payload_pf, f, cls=SafeEncoder)
-                return True
-            except:
-                raise e
+            remote_ok = True
+        else:
+            for attempt in range(3):
+                try:
+                    r = requests.put(RESTFUL_KV_URL, json=body, timeout=12)
+                    r.raise_for_status()
+                    remote_ok = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.2 * (attempt + 1))
+            if not remote_ok and last_err:
+                raise last_err
+    except Exception as e:
+        print(f"Remote portfolio save failed: {e}. Local copy is safe.")
+        last_err = e
 
-    last_err = None
-    for attempt in range(3):
-        try:
-            r = requests.put(RESTFUL_KV_URL, json=body, timeout=12)
-            r.raise_for_status()
-            return True
-        except Exception as e:
-            last_err = e
-            time.sleep(0.2 * (attempt + 1))
-    
-    # Fallback to local file if remote API fails
-    try:
-        with open("paper_portfolio.json", "w") as f:
-            json.dump(payload_pf, f, cls=SafeEncoder)
+    if local_ok:
+        if not remote_ok:
+            pf["_save_error"] = f"Remote failed ({last_err}), but local copy saved successfully."
         return True
-    except:
+    
+    if last_err:
         raise last_err
+    raise IOError("Failed to save portfolio locally.")
+>>>>>>> Stashed changes
 
 
 def load_portfolio():

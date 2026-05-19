@@ -22,7 +22,11 @@ def _count_today_trades(portfolio: dict) -> int:
     """Count trades executed today."""
     today = datetime.now(NY).strftime("%Y-%m-%d")
     history = portfolio.get("history", [])
-    return sum(1 for h in history if h.get("time", "").startswith(today) and h.get("action") == "BUY")
+    return sum(
+        1 for h in history
+        if (h.get("date") == today or h.get("time", "").startswith(today))
+        and h.get("action") == "BUY"
+    )
 
 
 def _count_consecutive_losses(portfolio: dict) -> int:
