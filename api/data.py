@@ -172,9 +172,10 @@ def _calculate_strike_recommendation(spy_price, direction_bias, signal_grade,
     }
 
 KV_URL = "https://api.restful-api.dev/objects/ff8081819d82fab6019e405b84415410"
+MAX_TRADE_HISTORY = 250
 
 def _default_pf():
-    return {"cash": STARTING_BALANCE, "positions": {}, "history": [], "trade_log": [], "initial_balance": STARTING_BALANCE, "current_value": STARTING_BALANCE, "total_return_pct": 0.0}
+    return {"cash": STARTING_BALANCE, "positions": {}, "history": [], "trade_log": [], "recent_trades": [], "initial_balance": STARTING_BALANCE, "current_value": STARTING_BALANCE, "total_return_pct": 0.0}
 
 def _normalize_pf(pf):
     base = _default_pf()
@@ -184,6 +185,7 @@ def _normalize_pf(pf):
     base["positions"] = base.get("positions") or {}
     base["history"] = base.get("history") or []
     base["trade_log"] = base.get("trade_log") or []
+    base["recent_trades"] = base.get("recent_trades") or _build_recent_trades(base)
     return base
 
 def load_portfolio():
@@ -195,11 +197,54 @@ def load_portfolio():
     except: pass
     return _default_pf()
 
+def _trade_recency_key(item):
+    return item.get("exit_ts") or item.get("entry_ts") or item.get("logged_at") or f"{item.get('date', '')} {item.get('exit_time') or item.get('entry_time') or item.get('time', '')}"
+
+
+def _merge_trade_records(items):
+    """Merge trade rows by trade_id; keep the most complete / latest version."""
+    merged = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        tid = item.get("trade_id") or f"{item.get('date')}-{item.get('entry_time')}-{item.get('direction')}-{item.get('K_buy')}"
+        prev = merged.get(tid)
+        if not prev or _trade_recency_key(item) >= _trade_recency_key(prev):
+            merged[tid] = item
+    return sorted(merged.values(), key=_trade_recency_key, reverse=True)
+
+
+def _cap_list(items, limit=MAX_TRADE_HISTORY):
+    return list(items)[:limit] if items else []
+
+
+def _append_history(pf, record):
+    hist = pf.setdefault("history", [])
+    hist.insert(0, record)
+    pf["history"] = _cap_list(hist)
+
+
 def _append_trade_event(pf, event):
     log = pf.setdefault("trade_log", [])
     event["logged_at"] = datetime.now(NY).strftime("%Y-%m-%d %H:%M:%S")
     log.insert(0, event)
-    del log[100:]
+    pf["trade_log"] = _cap_list(log)
+
+
+def _build_recent_trades(pf):
+    """Persistent Recent Trades feed: closed history + currently open positions."""
+    rows = _merge_trade_records(list(pf.get("history") or []))
+    open_ids = set()
+    for pos in (pf.get("positions") or {}).values():
+        row = dict(pos)
+        row["status"] = "OPEN"
+        row.setdefault("action", "BUY")
+        tid = row.get("trade_id")
+        if tid:
+            open_ids.add(tid)
+        rows = [r for r in rows if r.get("trade_id") != tid]
+        rows.insert(0, row)
+    return _cap_list(_merge_trade_records(rows))
 
 def _close_trade(pos, now, spy_p, exit_val, exit_type):
     contracts = int(pos.get("contracts", 0) or 0)
@@ -257,7 +302,7 @@ def _position_invalid_reason(open_pos, grade, direction_bias, score_result):
 def _record_position_close(portfolio, open_pos, today_str, now, spy_p, exit_val, exit_type):
     open_pos = _close_trade(open_pos, now, spy_p, exit_val, exit_type)
     portfolio["cash"] += open_pos["revenue"]
-    portfolio["history"].insert(0, open_pos.copy())
+    _append_history(portfolio, open_pos.copy())
     _append_trade_event(portfolio, {
         "event": "CLOSE",
         "trade_id": open_pos.get("trade_id"),
@@ -280,13 +325,14 @@ def _record_position_close(portfolio, open_pos, today_str, now, spy_p, exit_val,
         "win": open_pos.get("win"),
     })
     del portfolio["positions"][today_str]
-    save_portfolio(portfolio)
 
 def save_portfolio(pf):
     try:
-        # Update portfolio metrics
+        remote = load_portfolio()
+        pf["history"] = _cap_list(_merge_trade_records((remote.get("history") or []) + (pf.get("history") or [])))
+        pf["trade_log"] = _cap_list(_merge_trade_records((remote.get("trade_log") or []) + (pf.get("trade_log") or [])))
+        pf["recent_trades"] = _build_recent_trades(pf)
         pf["current_value"] = pf["cash"]
-        # Add value of open positions
         for p in pf.get("positions", {}).values():
             pf["current_value"] += p.get("cost", 0)
         pf["total_return_pct"] = round(((pf["current_value"] / pf["initial_balance"]) - 1) * 100, 2)
@@ -345,18 +391,6 @@ class handler(BaseHTTPRequestHandler):
                 d_range = float(spy_h["High"].max() - spy_h["Low"].min())
 
             # ── CALL SCORE ENGINE (Modular 140-point system) ──
-            engine_data = {
-                "spy_price": spy_p,
-                "prev_close": spy_prev,
-                "vix_price": vix_p,
-                "vix3m_price": vix3m_p,
-                "vwap": vwap,
-                "vol_ratio": vol_r,
-                "range_value": d_range,
-                "pcts": pcts_data,
-                "portfolio": load_portfolio()
-            }
-            
             t_min = now.hour * 60 + now.minute
             is_regular = 570 <= t_min <= 960
             portfolio = load_portfolio()
@@ -396,7 +430,6 @@ class handler(BaseHTTPRequestHandler):
                 signal["action"] = "Market not in session"
 
             # ── PAPER TRADING EXECUTION ──
-            portfolio = load_portfolio()
             today_str = now.strftime("%Y-%m-%d")
             vix_val = vix_p if vix_p > 0 else 18.0
             
@@ -405,7 +438,7 @@ class handler(BaseHTTPRequestHandler):
             for date_key, pos in portfolio.get("positions", {}).items():
                 if date_key != today_str:
                     pos = _close_trade(pos, now, 0, 0, "STALE_EOD")
-                    portfolio["history"].insert(0, pos)
+                    _append_history(portfolio, pos)
                     _append_trade_event(portfolio, {
                         "event": "CLOSE",
                         "trade_id": pos.get("trade_id"),
@@ -420,7 +453,6 @@ class handler(BaseHTTPRequestHandler):
                     to_remove.append(date_key)
             if to_remove:
                 for k in to_remove: del portfolio["positions"][k]
-                save_portfolio(portfolio)
 
             # 2. Check for entry (only while entry criteria hold)
             open_pos = portfolio.get("positions", {}).get(today_str)
@@ -470,7 +502,6 @@ class handler(BaseHTTPRequestHandler):
                             "net_debit": round(net_debit, 2),
                             "cost": cost,
                         })
-                        save_portfolio(portfolio)
 
             # 3. Manage open position — mark, exit when signal invalid / SL / TP / EOD
             open_pos = portfolio.get("positions", {}).get(today_str)
@@ -510,7 +541,9 @@ class handler(BaseHTTPRequestHandler):
                     _record_position_close(portfolio, open_pos, today_str, now, spy_p, exit_val, exit_type)
                 else:
                     portfolio["positions"][today_str] = open_pos
-                    save_portfolio(portfolio)
+
+            portfolio["recent_trades"] = _build_recent_trades(portfolio)
+            save_portfolio(portfolio)
 
             rules = {
                 "vix": {"val": f"{vix_p:.2f}", "ok": vix_p >= 14},

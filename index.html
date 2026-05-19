@@ -75,7 +75,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 .pt-value{font-size:1.2rem;font-weight:700}
 .pt-positions{margin-top:0.8rem;padding-top:0.6rem;border-top:1px dashed var(--border);font-size:0.75rem;color:#a0a5b5}
 .pt-history-title{font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;margin-top:1rem;margin-bottom:0.4rem;font-weight:700}
-.pt-history-list{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;padding-right:4px}
+.pt-history-list{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto;padding-right:4px}
 .pt-hist-item{display:flex;justify-content:space-between;background:rgba(255,255,255,0.02);padding:0.4rem 0.6rem;border-radius:6px;font-size:0.7rem;border:1px solid transparent}
 .pt-hist-item:hover{background:rgba(255,255,255,0.04);border-color:var(--border)}
 /* Legacy Rule List */
@@ -307,6 +307,21 @@ function renderLayerBars(layers) {
   }).join('');
 }
 
+function buildRecentTrades(pt) {
+  if (pt.recent_trades && pt.recent_trades.length) return pt.recent_trades;
+  const byId = new Map();
+  const recency = (h) => h.exit_ts || h.entry_ts || h.logged_at || `${h.date || ''} ${h.exit_time || h.entry_time || h.time || ''}`;
+  for (const h of (pt.history || [])) {
+    const id = h.trade_id || `${h.date}-${h.entry_time}-${h.direction}-${h.K_buy}`;
+    byId.set(id, h);
+  }
+  for (const e of (pt.trade_log || [])) {
+    const id = e.trade_id || `${e.date}-${e.time}-${e.direction}-${e.K_buy}`;
+    if (!byId.has(id)) byId.set(id, e);
+  }
+  return Array.from(byId.values()).sort((a, b) => (recency(a) < recency(b) ? 1 : -1));
+}
+
 function render(py) {
   document.getElementById('syncTime').textContent = py.last_updated + ' ET';
   document.getElementById('latency').textContent = py.latency_ms + 'ms';
@@ -488,7 +503,7 @@ function render(py) {
     }
 
     // Render History Log
-    const hist = (pt.history && pt.history.length > 0) ? pt.history : (pt.trade_log || []);
+    const hist = buildRecentTrades(pt);
     if(hist.length > 0) {
       document.getElementById('ptHistory').innerHTML = hist.map(h => {
         const isOpenEvent = h.event === 'OPEN' || h.status === 'OPEN';
@@ -497,7 +512,7 @@ function render(py) {
         const timeLabel = isOpenEvent ? (h.time || h.entry_time || '--') : `${h.entry_time || '--'}→${h.exit_time || '--'}`;
         return `<div class="pt-hist-item">
           <span>
-            <span style="color:var(--muted);margin-right:8px">${h.date.substring(5)}</span>
+            <span style="color:var(--muted);margin-right:8px">${(h.date || '').length >= 5 ? h.date.substring(5) : (h.date || '--')}</span>
             <span style="color:${h.direction==='CALL'?'var(--go)':'var(--stop)'};font-weight:700">${h.direction}</span>
             <span style="margin-left:4px;color:#a0a5b5">${h.K_buy}/${h.K_sell}</span>
             <span style="margin-left:6px;color:var(--muted);font-size:0.6rem">${timeLabel}</span>
