@@ -101,12 +101,11 @@ def run_backtest(days=30, balance=2000.0):
 
     dates = spy_d.index[-days:]
     r = 0.05
-    SPREAD_PCT = 0.03   # bid-ask spread
+    SPREAD_PCT = 0.03
     SLIPPAGE = 0.02
-    TP_PCT = 0.80       # +80% take profit
-    SL_PCT = 1.00       # no SL — max loss = debit paid (spread is capped)
-    SPREAD_WIDTH = 3    # $3 wide debit spread (buy ATM, sell OTM+3)
-    MIN_VIX = 15.0
+    TP_PCT = 1.00       # +100% take profit (let winners run)
+    SL_PCT = 1.00       # no SL — max loss = debit paid
+    SPREAD_WIDTH = 5    # $5 wide debit spread (more room for profit)
     MIN_SCORE = 90      # STRONG signals only
 
     trades = []
@@ -163,9 +162,6 @@ def run_backtest(days=30, balance=2000.0):
         if score < MIN_SCORE or grade != "STRONG":
             print(f"{ds:<11} {score:>3} {'X':<2} {grade:<4} {'':>5} {'':>5} {'':>6} {'':>6} {'':>7} {'SKIP':>7} {'':>3} ${balance:>9,.0f}")
             continue
-        if vix_val < MIN_VIX:
-            print(f"{ds:<11} {score:>3} {'V':<2} {grade:<4} {'':>5} {'':>5} {'':>6} {'':>6} {'':>7} {'LOWV':>7} {'':>3} ${balance:>9,.0f}")
-            continue
 
         # ── DEBIT SPREAD SIMULATION ──
         opt = "call" if direction == "CALL" else "put"
@@ -193,13 +189,15 @@ def run_backtest(days=30, balance=2000.0):
         # Max loss = net debit paid
 
         # ── Dynamic VIX-based sizing ──
-        # Higher VIX = more confident sizing (more premium to work with)
-        if vix_val >= 25:
-            risk_pct = 0.08  # 8% risk in high-vol
+        # Dynamic sizing: 95+ = aggressive, 90-94 = standard
+        if score >= 95:
+            risk_pct = 0.10  # 10% risk on highest conviction
+        elif vix_val >= 25:
+            risk_pct = 0.08
         elif vix_val >= 20:
             risk_pct = 0.06
         else:
-            risk_pct = 0.04  # 4% risk in normal vol
+            risk_pct = 0.05
 
         max_risk = balance * risk_pct
         num_contracts = max(1, int(max_risk / (net_debit * 100)))
@@ -297,10 +295,10 @@ def run_backtest(days=30, balance=2000.0):
     print(f"  Sharpe Ratio:      {sharpe:.2f}")
     print(f"  ---")
     print(f"  Strategy:          ${SPREAD_WIDTH} wide debit spread (ATM/OTM)")
-    print(f"  Exit:              TP +{TP_PCT*100:.0f}% / SL -{SL_PCT*100:.0f}% / EOD")
-    print(f"  VIX filter:        >= {MIN_VIX}")
-    print(f"  Score filter:      >= {MIN_SCORE}")
-    print(f"  Sizing:            Dynamic (4-8% risk based on VIX)")
+    print(f"  Exit:              TP +{TP_PCT*100:.0f}% / No SL / EOD")
+    print(f"  Spread:            {SPREAD_PCT*100:.0f}% bid-ask + ${SLIPPAGE} slippage")
+    print(f"  Score filter:      >= {MIN_SCORE} (95+ = 2x size)")
+    print(f"  Sizing:            5% base, 10% on score 95+")
     print("=" * 80)
 
     results = {
