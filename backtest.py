@@ -1,6 +1,6 @@
 """
 SPY 0DTE Signal Machine — Tuned Backtest v3
-Debit spreads + Dynamic VIX sizing + Smart entry timing
+Debit spreads + No SL (capped risk) + STRONG only + VIX sizing
 """
 import math, json, sys
 from datetime import datetime, timedelta
@@ -69,7 +69,7 @@ def score_day(row, vix, qqq_pct, iwm_pct, adx, rsi):
 
     raw = regime + corr + 20 + tech  # 20 = prime window
     norm_score = max(0, int((raw / 110) * 100))
-    grade = "STRONG" if norm_score >= 90 else "HIGH" if norm_score >= 85 else "MODERATE" if norm_score >= 75 else "WEAK" if norm_score >= 60 else "NONE"
+    grade = "STRONG" if norm_score >= 90 else "MODERATE" if norm_score >= 75 else "WEAK" if norm_score >= 60 else "NONE"
     return norm_score, grade, d
 
 
@@ -103,11 +103,11 @@ def run_backtest(days=30, balance=2000.0):
     r = 0.05
     SPREAD_PCT = 0.03   # bid-ask spread
     SLIPPAGE = 0.02
-    TP_PCT = 0.60       # +60% take profit
-    SL_PCT = 0.35       # -35% stop loss
+    TP_PCT = 0.80       # +80% take profit
+    SL_PCT = 1.00       # no SL — max loss = debit paid (spread is capped)
     SPREAD_WIDTH = 3    # $3 wide debit spread (buy ATM, sell OTM+3)
     MIN_VIX = 15.0
-    MIN_SCORE = 85
+    MIN_SCORE = 90      # STRONG signals only
 
     trades = []
     wins, losses = 0, 0
@@ -160,7 +160,7 @@ def run_backtest(days=30, balance=2000.0):
         score, grade, direction = score_day(row_dict, vix_val, qqq_p, iwm_p, adx_v, rsi_v)
 
         # Entry filter: score >= 85 and VIX >= 15
-        if score < MIN_SCORE or grade not in ("STRONG", "HIGH"):
+        if score < MIN_SCORE or grade != "STRONG":
             print(f"{ds:<11} {score:>3} {'X':<2} {grade:<4} {'':>5} {'':>5} {'':>6} {'':>6} {'':>7} {'SKIP':>7} {'':>3} ${balance:>9,.0f}")
             continue
         if vix_val < MIN_VIX:
@@ -200,9 +200,6 @@ def run_backtest(days=30, balance=2000.0):
             risk_pct = 0.06
         else:
             risk_pct = 0.04  # 4% risk in normal vol
-
-        if grade == "HIGH":
-            risk_pct *= 0.5  # half size for HIGH vs STRONG
 
         max_risk = balance * risk_pct
         num_contracts = max(1, int(max_risk / (net_debit * 100)))
