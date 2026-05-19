@@ -475,30 +475,36 @@ function render(py) {
     // Render Active Positions
     const pos = Object.values(pt.positions || {});
     if(pos.length > 0) {
-      document.getElementById('ptPositions').innerHTML = pos.map(p => 
-        `<div style="display:flex;justify-content:space-between;color:var(--text);margin-bottom:4px">
-          <span><span style="color:${p.direction==='CALL'?'var(--go)':'var(--stop)'};font-weight:700">[${p.direction}]</span> ${p.K_buy}/${p.K_sell} <span style="color:var(--muted);font-size:0.7rem">x${p.contracts}</span></span>
-          <span style="color:var(--info);font-weight:700">$${(p.cost||0).toFixed(2)}</span>
+      document.getElementById('ptPositions').innerHTML = pos.map(p => {
+        const upnl = p.unrealized_pnl || 0;
+        const pnlColor = upnl >= 0 ? 'var(--go)' : 'var(--stop)';
+        return `<div style="display:flex;justify-content:space-between;color:var(--text);margin-bottom:4px">
+          <span><span style="color:${p.direction==='CALL'?'var(--go)':'var(--stop)'};font-weight:700">[${p.direction}]</span> ${p.K_buy}/${p.K_sell} <span style="color:var(--muted);font-size:0.7rem">x${p.contracts} @ ${p.entry_time || p.time || '--'}</span></span>
+          <span style="text-align:right"><span style="color:var(--info);font-weight:700">$${(p.current_val||p.net_debit||0).toFixed(2)}</span> <span style="color:${pnlColor};font-weight:700">${upnl>=0?'+':''}$${upnl.toFixed(0)}</span></span>
         </div>`
-      ).join('');
+      }).join('');
     } else {
       document.getElementById('ptPositions').innerHTML = '<span style="color:var(--muted)">No active positions.</span>';
     }
 
     // Render History Log
-    const hist = pt.history || [];
+    const hist = (pt.history && pt.history.length > 0) ? pt.history : (pt.trade_log || []);
     if(hist.length > 0) {
       document.getElementById('ptHistory').innerHTML = hist.map(h => {
-        const isWin = h.pnl > 0;
+        const isOpenEvent = h.event === 'OPEN' || h.status === 'OPEN';
+        const pnl = h.pnl || 0;
+        const isWin = pnl > 0;
+        const timeLabel = isOpenEvent ? (h.time || h.entry_time || '--') : `${h.entry_time || '--'}→${h.exit_time || '--'}`;
         return `<div class="pt-hist-item">
           <span>
             <span style="color:var(--muted);margin-right:8px">${h.date.substring(5)}</span>
             <span style="color:${h.direction==='CALL'?'var(--go)':'var(--stop)'};font-weight:700">${h.direction}</span>
             <span style="margin-left:4px;color:#a0a5b5">${h.K_buy}/${h.K_sell}</span>
+            <span style="margin-left:6px;color:var(--muted);font-size:0.6rem">${timeLabel}</span>
           </span>
           <span style="text-align:right">
-            <span style="color:var(--muted);font-size:0.6rem;margin-right:6px">[${h.exit_type}]</span>
-            <span style="color:${isWin?'var(--go)':'var(--stop)'};font-weight:700">${isWin?'+':''}$${(h.pnl||0).toFixed(0)}</span>
+            <span style="color:var(--muted);font-size:0.6rem;margin-right:6px">[${isOpenEvent ? 'OPEN' : h.exit_type}]</span>
+            <span style="color:${isOpenEvent?'var(--info)':(isWin?'var(--go)':'var(--stop)')};font-weight:700">${isOpenEvent ? '$'+(h.cost||0).toFixed(0) : (isWin?'+':'')+'$'+pnl.toFixed(0)}</span>
           </span>
         </div>`;
       }).join('');

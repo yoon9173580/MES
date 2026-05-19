@@ -172,16 +172,53 @@ def _calculate_strike_recommendation(spy_price, direction_bias, signal_grade,
 KV_URL = "https://api.restful-api.dev/objects/ff8081819d82fab6019e405b84415410"
 
 def _default_pf():
-    return {"cash": STARTING_BALANCE, "positions": {}, "history": [], "initial_balance": STARTING_BALANCE, "current_value": STARTING_BALANCE, "total_return_pct": 0.0}
+    return {"cash": STARTING_BALANCE, "positions": {}, "history": [], "trade_log": [], "initial_balance": STARTING_BALANCE, "current_value": STARTING_BALANCE, "total_return_pct": 0.0}
+
+def _normalize_pf(pf):
+    base = _default_pf()
+    if not isinstance(pf, dict):
+        return base
+    base.update(pf)
+    base["positions"] = base.get("positions") or {}
+    base["history"] = base.get("history") or []
+    base["trade_log"] = base.get("trade_log") or []
+    return base
 
 def load_portfolio():
     try:
         r = requests.get(KV_URL, timeout=3)
         if r.status_code == 200:
             data = r.json().get("data", {})
-            if "cash" in data: return data
+            if "cash" in data: return _normalize_pf(data)
     except: pass
     return _default_pf()
+
+def _append_trade_event(pf, event):
+    log = pf.setdefault("trade_log", [])
+    event["logged_at"] = datetime.now(NY).strftime("%Y-%m-%d %H:%M:%S")
+    log.insert(0, event)
+    del log[100:]
+
+def _close_trade(pos, now, spy_p, exit_val, exit_type):
+    contracts = int(pos.get("contracts", 0) or 0)
+    cost = float(pos.get("cost", 0) or 0)
+    revenue = round(float(exit_val) * 100 * contracts, 2)
+    pnl = round(revenue - cost, 2)
+    pnl_pct = round((pnl / cost) * 100, 1) if cost > 0 else 0.0
+    pos.update({
+        "status": "CLOSED",
+        "action": "SELL",
+        "exit_time": now.strftime("%H:%M"),
+        "exit_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "exit_spy": round(spy_p, 2) if spy_p else None,
+        "exit_val": round(float(exit_val), 2),
+        "exit_type": exit_type,
+        "revenue": revenue,
+        "pnl": pnl,
+        "pnl_pct": pnl_pct,
+        "win": pnl > 0,
+    })
+    return pos
 
 def save_portfolio(pf):
     try:
@@ -288,10 +325,19 @@ class handler(BaseHTTPRequestHandler):
             to_remove = []
             for date_key, pos in portfolio.get("positions", {}).items():
                 if date_key != today_str:
-                    pos["exit_val"] = 0
-                    pos["pnl"] = -pos.get("cost", 0)
-                    pos["exit_type"] = "EOD"
+                    pos = _close_trade(pos, now, 0, 0, "STALE_EOD")
                     portfolio["history"].insert(0, pos)
+                    _append_trade_event(portfolio, {
+                        "event": "CLOSE",
+                        "trade_id": pos.get("trade_id"),
+                        "date": pos.get("date"),
+                        "direction": pos.get("direction"),
+                        "K_buy": pos.get("K_buy"),
+                        "K_sell": pos.get("K_sell"),
+                        "exit_type": pos.get("exit_type"),
+                        "pnl": pos.get("pnl"),
+                        "pnl_pct": pos.get("pnl_pct"),
+                    })
                     to_remove.append(date_key)
             if to_remove:
                 for k in to_remove: del portfolio["positions"][k]
@@ -318,14 +364,33 @@ class handler(BaseHTTPRequestHandler):
                     
                     if contracts > 0:
                         cost = round(net_debit * 100 * contracts, 2)
+                        trade_id = f"{today_str}-{now.strftime('%H%M%S')}-{direction_bias}"
                         new_pos = {
-                            "date": today_str, "score": normalized, "grade": signal["grade"],
+                            "trade_id": trade_id, "date": today_str, "status": "OPEN", "action": "BUY",
+                            "score": normalized, "grade": signal["grade"],
                             "direction": direction_bias, "K_buy": K_buy, "K_sell": K_sell,
                             "net_debit": round(net_debit, 2), "contracts": contracts, "cost": cost,
-                            "entry_spy": round(spy_p, 2), "time": now.strftime("%H:%M")
+                            "entry_spy": round(spy_p, 2), "entry_time": now.strftime("%H:%M"),
+                            "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"), "time": now.strftime("%H:%M"),
+                            "current_val": round(net_debit, 2), "unrealized_pnl": 0.0, "unrealized_pnl_pct": 0.0
                         }
                         portfolio["positions"][today_str] = new_pos
                         portfolio["cash"] -= cost
+                        _append_trade_event(portfolio, {
+                            "event": "OPEN",
+                            "trade_id": trade_id,
+                            "date": today_str,
+                            "time": now.strftime("%H:%M"),
+                            "direction": direction_bias,
+                            "grade": signal["grade"],
+                            "score": normalized,
+                            "K_buy": K_buy,
+                            "K_sell": K_sell,
+                            "contracts": contracts,
+                            "entry_spy": round(spy_p, 2),
+                            "net_debit": round(net_debit, 2),
+                            "cost": cost,
+                        })
                         save_portfolio(portfolio)
 
             # 3. Check for exit (TP 100% or EOD)
@@ -339,6 +404,13 @@ class handler(BaseHTTPRequestHandler):
                 lp = bs_price(spy_p, open_pos["K_buy"], T_rem, 0.05, iv, opt)
                 sp = bs_price(spy_p, open_pos["K_sell"], T_rem, 0.05, iv, opt)
                 current_val = max(0, lp - sp) * 0.97 - 0.04
+                mark_value = round(max(0, current_val), 2)
+                mark_revenue = round(mark_value * 100 * open_pos["contracts"], 2)
+                open_pos["current_val"] = mark_value
+                open_pos["mark_spy"] = round(spy_p, 2)
+                open_pos["mark_time"] = now.strftime("%H:%M")
+                open_pos["unrealized_pnl"] = round(mark_revenue - open_pos["cost"], 2)
+                open_pos["unrealized_pnl_pct"] = round((open_pos["unrealized_pnl"] / open_pos["cost"]) * 100, 1) if open_pos.get("cost", 0) > 0 else 0.0
                 
                 tp_price = open_pos["net_debit"] * 2.0
                 closed = False
@@ -353,12 +425,34 @@ class handler(BaseHTTPRequestHandler):
                     closed = True
                     
                 if closed:
-                    revenue = round(open_pos["exit_val"] * 100 * open_pos["contracts"], 2)
-                    portfolio["cash"] += revenue
-                    open_pos["pnl"] = round(revenue - open_pos["cost"], 2)
-                    open_pos["exit_spy"] = round(spy_p, 2)
-                    portfolio["history"].insert(0, open_pos)
+                    open_pos = _close_trade(open_pos, now, spy_p, open_pos["exit_val"], exit_type)
+                    portfolio["cash"] += open_pos["revenue"]
+                    portfolio["history"].insert(0, open_pos.copy())
+                    _append_trade_event(portfolio, {
+                        "event": "CLOSE",
+                        "trade_id": open_pos.get("trade_id"),
+                        "date": open_pos.get("date"),
+                        "entry_time": open_pos.get("entry_time"),
+                        "exit_time": open_pos.get("exit_time"),
+                        "direction": open_pos.get("direction"),
+                        "K_buy": open_pos.get("K_buy"),
+                        "K_sell": open_pos.get("K_sell"),
+                        "contracts": open_pos.get("contracts"),
+                        "entry_spy": open_pos.get("entry_spy"),
+                        "exit_spy": open_pos.get("exit_spy"),
+                        "net_debit": open_pos.get("net_debit"),
+                        "exit_val": open_pos.get("exit_val"),
+                        "exit_type": open_pos.get("exit_type"),
+                        "cost": open_pos.get("cost"),
+                        "revenue": open_pos.get("revenue"),
+                        "pnl": open_pos.get("pnl"),
+                        "pnl_pct": open_pos.get("pnl_pct"),
+                        "win": open_pos.get("win"),
+                    })
                     del portfolio["positions"][today_str]
+                    save_portfolio(portfolio)
+                else:
+                    portfolio["positions"][today_str] = open_pos
                     save_portfolio(portfolio)
 
             rules = {
