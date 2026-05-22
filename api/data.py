@@ -304,8 +304,17 @@ def _normalize_pf(pf):
     base["recent_trades"] = base.get("recent_trades") or _build_recent_trades(base)
     return base
 
+def _kv_credentials():
+    """Resolve Upstash KV credentials from either naming convention."""
+    url = (os.getenv("UPSTASH_REDIS_REST_URL")
+           or os.getenv("KV_REST_API_URL", "")).rstrip("/")
+    token = (os.getenv("UPSTASH_REDIS_REST_TOKEN")
+             or os.getenv("KV_REST_API_TOKEN", ""))
+    return (url, token) if url and token else (None, None)
+
 def _storage_backend():
-    if os.getenv("KV_REST_API_URL") and os.getenv("KV_REST_API_TOKEN"):
+    url, token = _kv_credentials()
+    if url and token:
         return "upstash"
     return "restful"
 
@@ -341,8 +350,7 @@ def _fetch_raw_portfolio(retries=3):
     for attempt in range(retries):
         try:
             if _storage_backend() == "upstash":
-                base = os.getenv("KV_REST_API_URL", "").rstrip("/")
-                token = os.getenv("KV_REST_API_TOKEN", "")
+                base, token = _kv_credentials()
                 r = requests.get(
                     f"{base}/get/{PORTFOLIO_STORAGE_KEY}",
                     headers={"Authorization": f"Bearer {token}"},
@@ -391,8 +399,7 @@ def _write_raw_portfolio(pf):
     last_err = None
     try:
         if _storage_backend() == "upstash":
-            base = os.getenv("KV_REST_API_URL", "").rstrip("/")
-            token = os.getenv("KV_REST_API_TOKEN", "")
+            base, token = _kv_credentials()
             raw = json.dumps(payload_pf, cls=SafeEncoder)
             r = requests.post(
                 f"{base}/set/{PORTFOLIO_STORAGE_KEY}",
