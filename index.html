@@ -211,6 +211,42 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 .pdt-label{color:var(--muted);font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em}
 .pdt-value{font-weight:700;font-size:0.78rem}
 .pdt-window{color:var(--muted);font-size:0.6rem;margin-left:auto}
+
+/* ── Live Readiness Tracker ── */
+.lr-tracker{margin:0.8rem 0;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:linear-gradient(135deg,rgba(15,17,28,0.95),rgba(22,26,42,0.9));position:relative}
+.lr-tracker::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(91,140,255,0.3),rgba(126,87,255,0.3),transparent)}
+.lr-header{display:flex;justify-content:space-between;align-items:center;padding:0.7rem 0.8rem 0.4rem;cursor:pointer;user-select:none}
+.lr-header:hover .lr-title{opacity:1}
+.lr-title{font-size:0.65rem;color:var(--cyan);text-transform:uppercase;letter-spacing:0.12em;font-weight:700;display:flex;align-items:center;gap:6px;opacity:0.9;transition:opacity 0.3s}
+.lr-title::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;animation:lr-pulse 2s infinite}
+@keyframes lr-pulse{0%,100%{box-shadow:0 0 4px var(--cyan);background:var(--cyan)}50%{box-shadow:0 0 12px var(--cyan);background:rgba(0,232,252,0.7)}}
+.lr-phase-badge{font-size:0.58rem;font-weight:700;padding:0.15rem 0.5rem;border-radius:6px;letter-spacing:0.04em}
+.lr-phase-badge.phase1{background:rgba(91,140,255,0.15);color:var(--info);border:1px solid rgba(91,140,255,0.25)}
+.lr-phase-badge.phase2{background:rgba(126,87,255,0.15);color:var(--purple);border:1px solid rgba(126,87,255,0.25)}
+.lr-phase-badge.phase3{background:rgba(0,232,123,0.12);color:var(--go);border:1px solid rgba(0,232,123,0.2)}
+.lr-phase-badge.ready{background:rgba(0,232,123,0.2);color:var(--go);border:1px solid rgba(0,232,123,0.35);box-shadow:0 0 12px rgba(0,232,123,0.15)}
+.lr-body{padding:0 0.8rem 0.7rem}
+.lr-progress-track{position:relative;height:6px;background:rgba(255,255,255,0.04);border-radius:3px;margin-bottom:0.7rem;overflow:visible}
+.lr-progress-fill{height:100%;border-radius:3px;transition:width 1s cubic-bezier(0.4,0,0.2,1);position:relative}
+.lr-progress-fill::after{content:'';position:absolute;right:-1px;top:-2px;width:10px;height:10px;border-radius:50%;background:inherit;box-shadow:0 0 8px currentColor;opacity:0.8}
+.lr-progress-markers{position:absolute;top:-2px;left:0;right:0;height:10px;display:flex;justify-content:space-between;pointer-events:none}
+.lr-marker{width:2px;height:10px;border-radius:1px;background:rgba(255,255,255,0.12)}
+.lr-marker.active{background:rgba(255,255,255,0.35)}
+.lr-phases-labels{display:flex;justify-content:space-between;font-size:0.48rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:4px;margin-bottom:0.6rem}
+.lr-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem}
+.lr-metric{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px;padding:0.45rem 0.5rem;text-align:center;position:relative;overflow:hidden;transition:border-color 0.3s}
+.lr-metric:hover{border-color:var(--border2)}
+.lr-metric .lr-val{font-size:0.9rem;font-weight:800;font-family:'JetBrains Mono',monospace;line-height:1.2}
+.lr-metric .lr-lbl{font-size:0.46rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:2px}
+.lr-metric .lr-target{font-size:0.42rem;color:var(--muted);opacity:0.6;margin-top:1px}
+.lr-metric .lr-check{position:absolute;top:4px;right:5px;font-size:0.5rem}
+.lr-metric.pass{border-color:rgba(0,232,123,0.2)}
+.lr-metric.pass::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--go);opacity:0.4}
+.lr-metric.fail::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--stop);opacity:0.2}
+.lr-summary{margin-top:0.5rem;padding:0.4rem 0.6rem;border-radius:8px;font-size:0.65rem;display:flex;align-items:center;gap:6px;line-height:1.4}
+.lr-summary.not-ready{background:rgba(91,140,255,0.06);color:var(--info);border:1px solid rgba(91,140,255,0.12)}
+.lr-summary.almost{background:rgba(245,196,81,0.06);color:var(--warn);border:1px solid rgba(245,196,81,0.12)}
+.lr-summary.go-live{background:rgba(0,232,123,0.08);color:var(--go);border:1px solid rgba(0,232,123,0.18)}
 </style>
 </head>
 <body>
@@ -340,6 +376,31 @@ if(sessionStorage.getItem('spy_auth')==='1') document.getElementById('authGate')
       <span class="pdt-dots" id="pdtDots"></span>
       <span class="pdt-value" id="pdtValue">3/3</span>
       <span class="pdt-window" id="pdtWindow"></span>
+    </div>
+    <!-- Live Readiness Tracker -->
+    <div class="lr-tracker" id="lrTracker" style="display:none">
+      <div class="lr-header" onclick="document.getElementById('lrBody').style.display=document.getElementById('lrBody').style.display==='none'?'block':'none'">
+        <span class="lr-title">🎯 Live Readiness Tracker</span>
+        <span class="lr-phase-badge phase1" id="lrPhaseBadge">Phase 1</span>
+      </div>
+      <div class="lr-body" id="lrBody">
+        <div class="lr-progress-track">
+          <div class="lr-progress-fill" id="lrProgressFill" style="width:0%;background:linear-gradient(90deg,var(--info),var(--purple))"></div>
+          <div class="lr-progress-markers">
+            <div class="lr-marker"></div>
+            <div class="lr-marker" style="left:40%"></div>
+            <div class="lr-marker" style="left:80%"></div>
+            <div class="lr-marker"></div>
+          </div>
+        </div>
+        <div class="lr-phases-labels">
+          <span>Phase 1: 검증</span>
+          <span>Phase 2: 통계 축적</span>
+          <span>Phase 3: 최종 판단</span>
+        </div>
+        <div class="lr-metrics" id="lrMetrics"></div>
+        <div class="lr-summary not-ready" id="lrSummary"></div>
+      </div>
     </div>
     <div class="pt-positions mono" id="ptPositions">No active positions.</div>
     <div class="pt-stats mono" id="ptStats"></div>
@@ -820,6 +881,141 @@ function render(py) {
     } else {
       thStatsGrid.innerHTML = '';
     }
+
+    // ── LIVE READINESS TRACKER ──
+    (function renderReadinessTracker() {
+      const tracker = document.getElementById('lrTracker');
+      tracker.style.display = 'block';
+
+      const TARGET_TRADES = 30;
+      const TARGET_WIN_RATE = 55;
+      const TARGET_PROFIT_FACTOR = 1.3;
+      const TARGET_MDD_PCT = 30;
+      const TARGET_MAX_CONSEC_LOSS = 5;
+
+      const initialBal = pt.initial_balance || 500;
+      const tradeCount = totalTrades;
+      const wr = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+      const pf = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? 99 : 0);
+
+      // MDD calculation from equity curve
+      let peak = initialBal, maxDD = 0;
+      let equity = initialBal;
+      sortedClosed.forEach(h => {
+        equity += (h.realized_pnl || h.pnl || 0);
+        if (equity > peak) peak = equity;
+        const dd = ((peak - equity) / peak) * 100;
+        if (dd > maxDD) maxDD = dd;
+      });
+
+      // Max consecutive losses
+      let maxConsecLoss = 0, curConsecLoss = 0;
+      sortedClosed.forEach(h => {
+        const isWin = h.win || (h.pnl && h.pnl > 0);
+        if (!isWin) { curConsecLoss++; if (curConsecLoss > maxConsecLoss) maxConsecLoss = curConsecLoss; }
+        else curConsecLoss = 0;
+      });
+
+      // Check criteria
+      const checks = {
+        trades:   tradeCount >= TARGET_TRADES,
+        winRate:  wr >= TARGET_WIN_RATE,
+        pf:       pf >= TARGET_PROFIT_FACTOR,
+        mdd:      maxDD < TARGET_MDD_PCT,
+        streak:   maxConsecLoss <= TARGET_MAX_CONSEC_LOSS
+      };
+      const passedCount = Object.values(checks).filter(Boolean).length;
+
+      // Phase
+      let phase, phaseClass;
+      if (tradeCount >= TARGET_TRADES && passedCount === 5) {
+        phase = 'READY'; phaseClass = 'ready';
+      } else if (tradeCount >= 24) {
+        phase = 'Phase 3'; phaseClass = 'phase3';
+      } else if (tradeCount >= 12) {
+        phase = 'Phase 2'; phaseClass = 'phase2';
+      } else {
+        phase = 'Phase 1'; phaseClass = 'phase1';
+      }
+
+      // Progress percentage (weighted: 60% trade count, 40% criteria pass)
+      const tradeProg = Math.min(100, (tradeCount / TARGET_TRADES) * 100);
+      const criteriaProg = (passedCount / 5) * 100;
+      const overallProg = Math.min(100, tradeProg * 0.6 + criteriaProg * 0.4);
+
+      // Phase badge
+      const badge = document.getElementById('lrPhaseBadge');
+      badge.textContent = phase === 'READY' ? '✅ GO LIVE' : phase;
+      badge.className = 'lr-phase-badge ' + phaseClass;
+
+      // Progress bar
+      const fill = document.getElementById('lrProgressFill');
+      const gradColors = phase === 'READY'
+        ? 'linear-gradient(90deg, var(--go), #2eff9a)'
+        : phaseClass === 'phase3'
+          ? 'linear-gradient(90deg, var(--info), var(--go))'
+          : phaseClass === 'phase2'
+            ? 'linear-gradient(90deg, var(--info), var(--purple))'
+            : 'linear-gradient(90deg, var(--info), rgba(91,140,255,0.6))';
+      fill.style.width = overallProg.toFixed(1) + '%';
+      fill.style.background = gradColors;
+
+      // Metrics grid
+      const pfDisplay = pf >= 99 ? '∞' : pf.toFixed(2);
+      const metricsEl = document.getElementById('lrMetrics');
+      metricsEl.innerHTML = `
+        <div class="lr-metric ${checks.trades ? 'pass' : 'fail'}">
+          <div class="lr-check">${checks.trades ? '✅' : '⏳'}</div>
+          <div class="lr-val" style="color:${checks.trades ? 'var(--go)' : 'var(--text)'}">${tradeCount}/${TARGET_TRADES}</div>
+          <div class="lr-lbl">거래 수</div>
+          <div class="lr-target">목표 ${TARGET_TRADES}건</div>
+        </div>
+        <div class="lr-metric ${checks.winRate ? 'pass' : 'fail'}">
+          <div class="lr-check">${checks.winRate ? '✅' : (totalTrades > 0 ? '❌' : '⏳')}</div>
+          <div class="lr-val" style="color:${checks.winRate ? 'var(--go)' : (totalTrades > 0 ? 'var(--stop)' : 'var(--text)')}">${wr.toFixed(0)}%</div>
+          <div class="lr-lbl">승률</div>
+          <div class="lr-target">목표 ${TARGET_WIN_RATE}%+</div>
+        </div>
+        <div class="lr-metric ${checks.pf ? 'pass' : 'fail'}">
+          <div class="lr-check">${checks.pf ? '✅' : (totalTrades > 0 ? '❌' : '⏳')}</div>
+          <div class="lr-val" style="color:${checks.pf ? 'var(--go)' : (totalTrades > 0 ? 'var(--stop)' : 'var(--text)')}">${pfDisplay}</div>
+          <div class="lr-lbl">수익 팩터</div>
+          <div class="lr-target">목표 ${TARGET_PROFIT_FACTOR}+</div>
+        </div>
+        <div class="lr-metric ${checks.mdd ? 'pass' : 'fail'}">
+          <div class="lr-check">${checks.mdd ? '✅' : (totalTrades > 0 ? '❌' : '⏳')}</div>
+          <div class="lr-val" style="color:${checks.mdd ? 'var(--go)' : (maxDD >= TARGET_MDD_PCT ? 'var(--stop)' : 'var(--text)')}">${maxDD.toFixed(1)}%</div>
+          <div class="lr-lbl">최대 낙폭</div>
+          <div class="lr-target">한도 ${TARGET_MDD_PCT}% 미만</div>
+        </div>
+        <div class="lr-metric ${checks.streak ? 'pass' : 'fail'}">
+          <div class="lr-check">${checks.streak ? '✅' : (maxConsecLoss > TARGET_MAX_CONSEC_LOSS ? '❌' : '⏳')}</div>
+          <div class="lr-val" style="color:${checks.streak ? 'var(--go)' : (maxConsecLoss > TARGET_MAX_CONSEC_LOSS ? 'var(--stop)' : 'var(--text)')}">${maxConsecLoss}</div>
+          <div class="lr-lbl">최대 연패</div>
+          <div class="lr-target">한도 ${TARGET_MAX_CONSEC_LOSS}회 이하</div>
+        </div>
+        <div class="lr-metric ${passedCount === 5 ? 'pass' : ''}">
+          <div class="lr-val" style="color:${passedCount >= 4 ? 'var(--go)' : (passedCount >= 2 ? 'var(--warn)' : 'var(--text)')}">${passedCount}/5</div>
+          <div class="lr-lbl">통과 항목</div>
+          <div class="lr-target">전체 충족 시 GO</div>
+        </div>
+      `;
+
+      // Summary message
+      const summaryEl = document.getElementById('lrSummary');
+      const remainingTrades = Math.max(0, TARGET_TRADES - tradeCount);
+      const estWeeks = Math.ceil(remainingTrades / 3);
+      if (phase === 'READY') {
+        summaryEl.className = 'lr-summary go-live';
+        summaryEl.innerHTML = '🚀 모든 기준 충족! Alpaca 실전 연결 준비가 완료되었습니다.';
+      } else if (passedCount >= 4 && tradeCount >= 24) {
+        summaryEl.className = 'lr-summary almost';
+        summaryEl.innerHTML = `⚡ 거의 다 왔습니다! ${5 - passedCount}개 기준만 추가 충족하면 실전 전환 가능합니다. (남은 거래: ${remainingTrades}건)`;
+      } else {
+        summaryEl.className = 'lr-summary not-ready';
+        summaryEl.innerHTML = `📊 모의투자 진행 중 — 남은 거래 <b>${remainingTrades}건</b> (예상 <b>~${estWeeks}주</b>) · ${passedCount}/5 기준 통과`;
+      }
+    })();
 
     // Equity Curve
     const equityEl = document.getElementById('thEquity');
