@@ -392,97 +392,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 </style>
 </head>
 <body>
-<!-- Auth Gate — server-side cookie + optional Google SSO -->
-<div id="authGate" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center">
-  <div style="background:var(--surface);backdrop-filter:blur(24px);border:1px solid var(--border2);border-radius:20px;padding:2.5rem;text-align:center;max-width:360px;width:90%">
-    <div style="font-size:1.6rem;font-weight:900;letter-spacing:-1px;margin-bottom:0.3rem;background:linear-gradient(135deg,var(--purple),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent">SPY 0DTE</div>
-    <div style="font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.2em;margin-bottom:1.5rem">Signal Machine — Restricted Access</div>
-    <input id="authInput" type="password" placeholder="Enter password" autocomplete="off"
-      style="width:100%;padding:0.7rem 1rem;background:rgba(255,255,255,0.04);border:1px solid var(--border2);border-radius:10px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:0.85rem;outline:none;text-align:center;letter-spacing:2px;margin-bottom:0.8rem">
-    <button id="authBtn" onclick="tryUnlock()"
-      style="width:100%;padding:0.6rem;background:linear-gradient(135deg,rgba(91,140,255,0.3),rgba(167,139,250,0.3));border:1px solid rgba(167,139,250,0.3);border-radius:10px;color:var(--text);font-weight:700;font-size:0.8rem;cursor:pointer;letter-spacing:0.05em">UNLOCK</button>
-    <!-- Google SSO — injected dynamically when GOOGLE_CLIENT_ID is available -->
-    <div id="gDivider" style="display:none;align-items:center;gap:8px;margin:10px 0">
-      <div style="flex:1;height:1px;background:var(--border2)"></div>
-      <span style="font-size:0.65rem;color:var(--muted)">OR</span>
-      <div style="flex:1;height:1px;background:var(--border2)"></div>
-    </div>
-    <div id="gBtn" style="display:none;justify-content:center"></div>
-    <div id="authError" style="color:var(--stop);font-size:0.7rem;margin-top:0.6rem;opacity:0;transition:opacity 0.3s">ACCESS DENIED</div>
-    <div id="authSpin" style="display:none;font-size:0.7rem;color:var(--muted);margin-top:0.5rem">Verifying…</div>
-  </div>
-</div>
-<script>
-// ── Gate helpers ───────────────────────────────────────────────────────
-function _gateError(){
-  const el=document.getElementById('authError');
-  el.style.opacity='1';
-  document.getElementById('authInput').value='';
-  setTimeout(()=>el.style.opacity='0',2500);
-}
-function _gateSpin(on){document.getElementById('authSpin').style.display=on?'block':'none';}
-function _dismissGate(){document.getElementById('authGate').style.display='none';}
-
-// Server-side password unlock
-async function tryUnlock(){
-  const pw=document.getElementById('authInput').value.trim();
-  if(!pw)return;
-  _gateSpin(true);
-  try{
-    const r=await fetch('/api/unlock',{
-      method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({password:pw})
-    });
-    r.ok ? _dismissGate() : _gateError();
-  }catch(e){_gateError();}
-  finally{_gateSpin(false);}
-}
-
-// Google SSO callback
-async function _googleCallback(resp){
-  _gateSpin(true);
-  try{
-    const r=await fetch('/api/unlock',{
-      method:'POST',credentials:'include',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({google_token:resp.credential})
-    });
-    r.ok ? _dismissGate() : _gateError();
-  }catch(e){_gateError();}
-  finally{_gateSpin(false);}
-}
-
-// Mount Google button if clientId provided
-function _mountGoogle(clientId){
-  if(!clientId)return;
-  document.getElementById('gDivider').style.display='flex';
-  document.getElementById('gBtn').style.display='flex';
-  const s=document.createElement('script');
-  s.src='https://accounts.google.com/gsi/client';
-  s.onload=()=>{
-    google.accounts.id.initialize({client_id:clientId,callback:_googleCallback,auto_select:false});
-    google.accounts.id.renderButton(document.getElementById('gBtn'),
-      {theme:'filled_black',shape:'pill',text:'signin_with',size:'large',width:'300'});
-  };
-  document.head.appendChild(s);
-}
-
-// On page load: probe API — if 200 already authed (cookie), dismiss gate
-// If 401, show gate + mount Google button from response
-document.getElementById('authInput').addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock();});
-(async()=>{
-  try{
-    const r=await fetch('/api/data',{cache:'no-store',credentials:'include'});
-    if(r.ok){_dismissGate();return;}
-    if(r.status===401){
-      const d=await r.json().catch(()=>({}));
-      _mountGoogle(d.google_client_id||'');
-    }
-  }catch(e){/* offline – gate stays */}
-})();
-</script>
-
+<!-- Main app (auth enforced via Google SSO cookie; modal shown on 401) -->
 <div class="wrap">
   <!-- Status Bar -->
   <div class="status-bar">
@@ -1488,133 +1398,73 @@ document.getElementById('thTabs').addEventListener('click', e => {
   if (window._tradeHistData) renderTradeList(window._tradeHistData, window._maxAbsPnl, filter);
 });
 
-// Resolve Access Key from URL parameter first, then localStorage
-(function() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlKey = urlParams.get('key');
-  if (urlKey) {
-    localStorage.setItem('spy_api_access_key', urlKey);
-    // Strip query key from URL to keep address bar clean
-    const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-    window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
-  }
-})();
-
-function showAccessKeyModal(googleClientId) {
-  if (document.getElementById('accessKeyModal')) {
-    // If modal is already open, the retry was invalid
-    const errEl = document.getElementById('accessKeyErr');
+// Google Auth modal (replaces legacy password unlock key)
+function showGoogleAuthModal(googleClientId) {
+  if (document.getElementById('googleAuthModal')) {
+    const errEl = document.getElementById('googleAuthErr');
     if (errEl) {
-      errEl.textContent = "⚠️ Invalid Access Key. Try again.";
+      errEl.textContent = "⚠️ Google sign-in failed or unauthorized. Contact admin.";
       errEl.style.display = 'block';
-    }
-    const input = document.getElementById('accessKeyInput');
-    if (input) {
-      input.value = '';
-      input.focus();
     }
     return;
   }
   
   const modal = document.createElement('div');
-  modal.id = 'accessKeyModal';
+  modal.id = 'googleAuthModal';
   modal.style.position = 'fixed';
   modal.style.top = '0';
   modal.style.left = '0';
   modal.style.width = '100vw';
   modal.style.height = '100vh';
-  modal.style.background = 'rgba(10, 10, 12, 0.7)';
-  modal.style.backdropFilter = 'blur(12px)';
-  modal.style.webkitBackdropFilter = 'blur(12px)';
+  modal.style.background = 'rgba(10, 10, 12, 0.75)';
+  modal.style.backdropFilter = 'blur(16px)';
+  modal.style.webkitBackdropFilter = 'blur(16px)';
   modal.style.display = 'flex';
   modal.style.justifyContent = 'center';
   modal.style.alignItems = 'center';
   modal.style.zIndex = '99999';
   modal.style.animation = 'fadeIn 0.3s ease forwards';
   
-  const googleBtnHtml = googleClientId ? `
-    <div style="display: flex; align-items: center; margin: 1rem 0; width: 100%;">
-      <hr style="flex: 1; border: none; border-top: 1px solid rgba(255,255,255,0.08);">
-      <span style="padding: 0 10px; color: var(--muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">or</span>
-      <hr style="flex: 1; border: none; border-top: 1px solid rgba(255,255,255,0.08);">
-    </div>
-    <div id="googleBtnContainer" style="display: flex; justify-content: center; width: 100%; min-height: 40px;"></div>
-  ` : '';
-  
   modal.innerHTML = `
-    <div style="background: rgba(30, 30, 38, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 2rem; width: 340px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.4); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); transform: scale(0.9); animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;">
-      <div style="font-size: 2.2rem; margin-bottom: 0.8rem;">🔒</div>
-      <h3 style="color: #fff; font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; font-family: 'Outfit', sans-serif;">Access Restricted</h3>
-      <p style="color: var(--muted); font-size: 0.85rem; margin-bottom: 1.5rem; line-height: 1.4;">This system is protected. Please unlock the terminal to view market analytics.</p>
-      <input type="password" id="accessKeyInput" placeholder="Enter Access Key..." style="width: 100%; padding: 0.75rem 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #fff; text-align: center; margin-bottom: 1rem; font-size: 0.95rem; outline: none; box-sizing: border-box; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--info)'" onblur="this.style.borderColor='rgba(255,255,255,0.1)'">
-      <button id="accessKeyBtn" style="width: 100%; padding: 0.75rem; background: linear-gradient(135deg, var(--info), var(--purple)); border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 0.9rem; cursor: pointer; transition: transform 0.1s, opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'">Unlock Terminal</button>
-      ${googleBtnHtml}
-      <div id="accessKeyErr" style="color: var(--stop); font-size: 0.75rem; margin-top: 0.8rem; display: none; font-weight: 600;">⚠️ Invalid Access Key. Try again.</div>
+    <div style="background: rgba(26, 26, 32, 0.95); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 2rem 2.25rem; width: 360px; text-align: center; box-shadow: 0 24px 48px rgba(0,0,0,0.5); backdrop-filter: blur(24px); transform: scale(0.96); animation: scaleUp 0.35s cubic-bezier(0.23, 1, 0.32, 1) forwards; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;">
+      <div style="font-size: 2.6rem; margin-bottom: 0.6rem;">🔐</div>
+      <h3 style="color: #fff; font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem; font-family: 'Outfit', system-ui, sans-serif;">Google Sign-In Required</h3>
+      <p style="color: var(--muted); font-size: 0.82rem; margin-bottom: 1.25rem; line-height: 1.45; max-width: 280px;">This analytics terminal is restricted to authorized users. Please sign in with your Google account.</p>
+      
+      <div id="googleBtnContainer" style="display: flex; justify-content: center; width: 100%; min-height: 44px; margin: 0.5rem 0;"></div>
+      
+      <div id="googleAuthErr" style="color: var(--stop); font-size: 0.75rem; margin-top: 0.9rem; display: none; font-weight: 600;">⚠️ Sign-in failed or email not allowed.</div>
+      
+      <div style="margin-top: 1rem; font-size: 0.7rem; color: var(--muted); opacity: 0.7;">Only pre-approved emails can access.</div>
     </div>
     <style>
       @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-      @keyframes scaleUp { from { transform: scale(0.9); } to { transform: scale(1); } }
+      @keyframes scaleUp { from { transform: scale(0.96); } to { transform: scale(1); } }
     </style>
   `;
   
   document.body.appendChild(modal);
-  
-  const submit = async () => {
-    const val = document.getElementById('accessKeyInput').value.trim();
-    if (!val) return;
-    
-    try {
-      let r = await fetch('/api/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: val }),
-        credentials: 'include'
-      });
-      
-      if (r.ok) {
-        localStorage.removeItem('spy_api_access_key');
-        document.getElementById('accessKeyModal').remove();
-        loadData();
-      } else {
-        const errEl = document.getElementById('accessKeyErr');
-        if (errEl) {
-          errEl.textContent = "⚠️ Invalid Access Key. Try again.";
-          errEl.style.display = 'block';
-        }
-        const input = document.getElementById('accessKeyInput');
-        if (input) {
-          input.value = '';
-          input.focus();
-        }
-      }
-    } catch(e) {
-      console.error('Unlock error:', e);
-    }
-  };
-  
-  document.getElementById('accessKeyBtn').onclick = submit;
-  document.getElementById('accessKeyInput').onkeydown = (e) => {
-    if (e.key === 'Enter') submit();
-  };
-  
-  // Focus input
-  setTimeout(() => {
-    const input = document.getElementById('accessKeyInput');
-    if (input) input.focus();
-  }, 100);
 
   if (googleClientId) {
-    if (!window.google) {
-      const script = document.createElement('script');
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.defer = true;
-      script.onload = () => {
+    const loadGsi = () => {
+      if (!window.google) {
+        const script = document.createElement('script');
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.defer = true;
+        script.onload = () => initGoogleSignIn(googleClientId);
+        document.head.appendChild(script);
+      } else {
         initGoogleSignIn(googleClientId);
-      };
-      document.head.appendChild(script);
-    } else {
-      initGoogleSignIn(googleClientId);
+      }
+    };
+    // small delay so container is in DOM
+    setTimeout(loadGsi, 60);
+  } else {
+    const errEl = document.getElementById('googleAuthErr');
+    if (errEl) {
+      errEl.textContent = "⚠️ Google Client ID not configured. Contact admin.";
+      errEl.style.display = 'block';
     }
   }
 }
@@ -1641,12 +1491,13 @@ async function handleCredentialResponse(response) {
     });
     
     if (r.ok) {
-      document.getElementById('accessKeyModal').remove();
+      const m = document.getElementById('googleAuthModal');
+      if (m) m.remove();
       loadData();
     } else {
-      const errEl = document.getElementById('accessKeyErr');
+      const errEl = document.getElementById('googleAuthErr');
       if (errEl) {
-        errEl.textContent = "⚠️ Google Auth unauthorized. Contact Administrator.";
+        errEl.textContent = "⚠️ Google Auth unauthorized (email not allowed). Contact Administrator.";
         errEl.style.display = 'block';
       }
     }
@@ -1658,25 +1509,17 @@ async function handleCredentialResponse(response) {
 async function loadData() {
   const t0 = performance.now();
   try {
-    const key = localStorage.getItem('spy_api_access_key') || '';
-    const requestOptions = {
-      cache: 'no-store',
-      credentials: 'include',
-      headers: {}
-    };
-    if (key) {
-      requestOptions.headers['X-API-Key'] = key;
-    }
-    
-    let r = await fetch('/api/data', requestOptions);
+    // Cookie-based auth only (set by Google SSO /api/unlock). No more legacy key.
+    let r = await fetch('/api/data', { cache: 'no-store', credentials: 'include' });
     
     if (r.status === 401) {
       const respData = await r.json().catch(() => ({}));
-      showAccessKeyModal(respData.google_client_id);
+      showGoogleAuthModal(respData.google_client_id);
       return;
     }
     
     if (!r.ok) {
+      // Fallback for local/offline demo
       r = await fetch('data.json', {cache:'no-store'});
     }
     

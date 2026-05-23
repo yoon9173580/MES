@@ -1,7 +1,7 @@
 """
 Vercel Serverless API — /api/data
 SPY 0DTE Signal Machine — 7-Layer Score Engine
-Hybrid: Alpaca + Yahoo VIX + Google SSO & Session Cookie Hardening (Last Update: 2026-05-23)
+Google SSO only (replaced legacy UNLOCK key/password) + Session Cookie (Last Update: 2026-05-23)
 """
 import math, json, os, time, traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1218,18 +1218,12 @@ class handler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length).decode('utf-8')
             payload = json.loads(post_data) if post_data else {}
             
-            password = payload.get("password")
             credential = payload.get("credential")
             
             authorized = False
-            correct_password = os.getenv("UNLOCK_PASSWORD") or os.getenv("APP_SECRET_KEY")
             
-            # 1. Check Password Auth
-            if password and correct_password and password == correct_password:
-                authorized = True
-                
-            # 2. Check Google Credential Auth
-            elif credential:
+            # Google Credential Auth ONLY (replaced legacy unlock key/password)
+            if credential:
                 google_payload = _verify_google_token(credential)
                 if google_payload:
                     email = google_payload.get("email")
@@ -1240,6 +1234,10 @@ class handler(BaseHTTPRequestHandler):
                         print(f"[Google Auth Success] Authorized {email}")
                     else:
                         print(f"[Google Auth Blocked] Email {email} not in ALLOWED_EMAILS")
+                else:
+                    print("[Google Auth] Token verification failed")
+            else:
+                print("[Unlock] No credential provided - password auth removed")
             
             if authorized:
                 self.send_response(200)
@@ -1298,21 +1296,12 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": "Too Many Requests", "message": "Rate limit exceeded. Max 15 requests per minute."}).encode('utf-8'))
             return
 
-        # API Authentication — always enforced
-        correct_password = os.getenv("UNLOCK_PASSWORD") or os.getenv("APP_SECRET_KEY", "")
-        # Check for access_token cookie
+        # API Authentication — Google SSO cookie ONLY (legacy unlock key removed)
         cookie_header = self.headers.get("Cookie", "")
         has_cookie = "access_token=valid" in cookie_header
 
-        client_key = self.headers.get("X-API-Key") or self.headers.get("x-api-key")
-        if not client_key and "?" in self.path:
-            from urllib.parse import parse_qs, urlparse
-            query_params = parse_qs(urlparse(self.path).query)
-            client_key = query_params.get("key", [None])[0]
-
-        # Authenticated if: has valid cookie OR valid X-API-Key OR no password set (dev mode)
-        is_authed = has_cookie or (correct_password and client_key == correct_password)
-        if not is_authed and correct_password:
+        is_authed = has_cookie
+        if not is_authed:
                 origin = self.headers.get("Origin", "")
                 self.send_response(401)
                 self.send_header('Content-Type', 'application/json')
@@ -1326,7 +1315,7 @@ class handler(BaseHTTPRequestHandler):
                 google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
                 self.wfile.write(json.dumps({
                     "error": "Unauthorized", 
-                    "message": "Invalid or missing session cookie / Access Key",
+                    "message": "Please sign in with Google",
                     "google_client_id": google_client_id
                 }).encode('utf-8'))
                 return
