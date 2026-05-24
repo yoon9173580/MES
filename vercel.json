@@ -18,6 +18,10 @@
     {
       "src": "/api/unlock",
       "dest": "/api/data.py"
+    },
+    {
+      "src": "/api/logout",
+      "dest": "/api/data.py"
     }
   ]
 }
