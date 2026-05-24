@@ -20,7 +20,7 @@ from alpaca.data.requests import StockBarsRequest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engines.score_engine import run_score_engine, determine_signal_grade
-from engines.risk_manager import calculate_contracts  # if exists, else we'll approximate
+from engines.risk_manager import calculate_position_size, check_risk_rules  # risk functions available
 
 NY = pytz.timezone("America/New_York")
 
@@ -268,24 +268,32 @@ def run_full_thorough_backtest(start_date: datetime, end_date: datetime, initial
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Thorough Alpaca Historical Backtest (Real Engine)")
-    parser.add_argument("--start", type=str, default="2024-05-01", help="Start date YYYY-MM-DD")
-    parser.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD")
-    parser.add_argument("--timeframe", type=str, default="5Min", choices=["1Min", "5Min", "15Min"], help="Bar timeframe")
+    parser = argparse.ArgumentParser(description="Thorough Alpaca Historical Backtest (Real Engine + 1Min/5Min)")
+    parser.add_argument("--start", type=str, default=None, help="Start date YYYY-MM-DD (default: 6 months ago)")
+    parser.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD (default: today)")
+    parser.add_argument("--timeframe", type=str, default="1Min", choices=["1Min", "5Min", "15Min"], help="Bar timeframe")
     parser.add_argument("--balance", type=float, default=2000.0, help="Initial balance")
 
     args = parser.parse_args()
 
-    start_dt = datetime.strptime(args.start, "%Y-%m-%d")
-    end_dt = datetime.strptime(args.end, "%Y-%m-%d") if args.end else datetime.now()
+    # Default to last 6 months if no dates given
+    if args.end is None:
+        end_dt = datetime.now()
+    else:
+        end_dt = datetime.strptime(args.end, "%Y-%m-%d")
+
+    if args.start is None:
+        start_dt = end_dt - timedelta(days=180)  # ~6 months
+    else:
+        start_dt = datetime.strptime(args.start, "%Y-%m-%d")
 
     tf_map = {
         "1Min": TimeFrame(1, TimeFrameUnit.Minute),
         "5Min": TimeFrame(5, TimeFrameUnit.Minute),
         "15Min": TimeFrame(15, TimeFrameUnit.Minute),
     }
-    tf = tf_map.get(args.timeframe, TimeFrame(5, TimeFrameUnit.Minute))
+    tf = tf_map.get(args.timeframe, TimeFrame(1, TimeFrameUnit.Minute))
 
-    print(f"Running: {args.start} ~ {args.end or 'today'} | Timeframe: {args.timeframe}")
+    print(f"Running thorough backtest: {start_dt.date()} ~ {end_dt.date()} | Timeframe: {args.timeframe}")
 
     run_full_thorough_backtest(start_dt, end_dt, initial_balance=args.balance)
