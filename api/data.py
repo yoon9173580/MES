@@ -1038,18 +1038,11 @@ class handler(BaseHTTPRequestHandler):
             payload = json.loads(post_data) if post_data else {}
             
             credential = payload.get("credential")
-            password   = payload.get("password") or payload.get("key")
 
             authorized = False
 
-            # 1) Password fallback (UNLOCK_PASSWORD env var)
-            correct_pw = os.getenv("UNLOCK_PASSWORD") or os.getenv("APP_SECRET_KEY", "")
-            if password and correct_pw and password == correct_pw:
-                authorized = True
-                print("[Password Auth Success]")
-
-            # 2) Google Credential Auth
-            if not authorized and credential:
+            # Google Credential Auth ONLY
+            if credential:
                 google_payload = _verify_google_token(credential)
                 if google_payload:
                     email = google_payload.get("email")
@@ -1136,7 +1129,7 @@ class handler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Credentials', 'true')
                 self.end_headers()
                 
-                google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+                google_client_id = os.getenv("GOOGLE_CLIENT_ID", "729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com")
                 self.wfile.write(json.dumps({
                     "error": "Unauthorized", 
                     "message": "Please sign in with Google",

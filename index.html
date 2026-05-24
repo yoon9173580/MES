@@ -1368,7 +1368,7 @@ document.getElementById('thTabs').addEventListener('click', e => {
 });
 
 // Google Auth modal (replaces legacy password unlock key)
-function showGoogleAuthModal(googleClientId) {
+function showGoogleAuthModal(googleClientId || '729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com') {
   if (document.getElementById('googleAuthModal')) {
     const errEl = document.getElementById('googleAuthErr');
     if (errEl) {
@@ -1402,16 +1402,6 @@ function showGoogleAuthModal(googleClientId) {
       
       <div id="googleBtnContainer" style="display: flex; justify-content: center; width: 100%; min-height: 44px; margin: 0.5rem 0;"></div>
       
-      <!-- Password fallback -->
-      <div style="width:100%;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08)">
-        <input id="pwFallback" type="password" placeholder="Or enter password"
-          style="width:100%;padding:9px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:9px;color:#e8eaf0;font-family:monospace;font-size:13px;outline:none;text-align:center;letter-spacing:2px;box-sizing:border-box"
-        />
-        <button onclick="submitPwFallback()"
-          style="width:100%;margin-top:7px;padding:8px;background:rgba(91,140,255,0.2);border:1px solid rgba(91,140,255,0.3);border-radius:9px;color:#e8eaf0;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.05em">
-          UNLOCK
-        </button>
-      </div>
       <div id="googleAuthErr" style="color: var(--stop); font-size: 0.75rem; margin-top: 0.9rem; display: none; font-weight: 600;">⚠️ Sign-in failed or email not allowed.</div>
       
       <div style="margin-top: 1rem; font-size: 0.7rem; color: var(--muted); opacity: 0.7;">Only pre-approved emails can access.</div>
@@ -1423,9 +1413,7 @@ function showGoogleAuthModal(googleClientId) {
   `;
   
   document.body.appendChild(modal);
-  document.getElementById('pwFallback')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') submitPwFallback();
-  });
+
 
   if (googleClientId) {
     const loadGsi = () => {
@@ -1443,9 +1431,8 @@ function showGoogleAuthModal(googleClientId) {
     // small delay so container is in DOM
     setTimeout(loadGsi, 60);
   } else {
-    // No Google Client ID — password fallback is available, don't show error
-    const errEl = document.getElementById('googleAuthErr');
-    if (errEl) errEl.style.display = 'none';
+    // Fallback to hardcoded client ID
+    setTimeout(() => initGoogleSignIn("729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com"), 60);
   }
 }
 
@@ -1458,28 +1445,6 @@ function initGoogleSignIn(clientId) {
     document.getElementById("googleBtnContainer"),
     { theme: "outline", size: "large", width: 274 }
   );
-}
-
-async function submitPwFallback() {
-  const pw = document.getElementById('pwFallback')?.value?.trim();
-  if (!pw) return;
-  const errEl = document.getElementById('googleAuthErr');
-  try {
-    const r = await fetch('/api/unlock', {
-      method: 'POST', credentials: 'include',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({password: pw})
-    });
-    if (r.ok) {
-      document.getElementById('googleAuthModal')?.remove();
-      sessionStorage.setItem('hannae_auth_ok', '1');
-      loadData();
-    } else {
-      if (errEl) { errEl.textContent = '⚠️ Wrong password.'; errEl.style.display = 'block'; }
-    }
-  } catch(e) {
-    if (errEl) { errEl.textContent = '⚠️ Network error.'; errEl.style.display = 'block'; }
-  }
 }
 
 async function handleCredentialResponse(response) {
@@ -1588,9 +1553,9 @@ async function loadData() {
     try {
       const r = await fetch('/api/data', { cache: 'no-store', credentials: 'include' });
       const respData = await r.json().catch(() => ({}));
-      showGoogleAuthModal(respData.google_client_id);
+      showGoogleAuthModal(respData.google_client_id || '729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com');
     } catch (e) {
-      showGoogleAuthModal(''); // fallback, will show "Client ID not configured"
+      showGoogleAuthModal('729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com'); // fallback, will show "Client ID not configured"
     }
     return;
   }
@@ -1603,7 +1568,7 @@ async function loadData() {
       sessionStorage.removeItem('hannae_auth_ok');
       stopDataPolling();
       const respData = await r.json().catch(() => ({}));
-      showGoogleAuthModal(respData.google_client_id);
+      showGoogleAuthModal(respData.google_client_id || '729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com');
       return;
     }
     
