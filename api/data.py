@@ -38,7 +38,7 @@ FLASHALPHA_API_KEY = os.getenv("FLASHALPHA_API_KEY", "")
 FLASHALPHA_API_URL = "https://lab.flashalpha.com/v1"
 _VIX_CACHE = {"at": 0.0, "vix": 18.0, "vix3m": None}
 VIX_CACHE_SEC = int(os.getenv("VIX_CACHE_SEC", "45"))
-YAHOO_UA = "Mozilla/5.0 (compatible; SPY0DTE/1.0)"
+YAHOO_UA = "Mozilla/5.0 (compatible; ESFutures/2.0)"
 
 
 class SafeEncoder(json.JSONEncoder):
@@ -389,9 +389,16 @@ def _normalize_pf(pf):
     if not isinstance(pf, dict):
         return base
     base.update(pf)
+    # ── ES Futures Migration: reset old options-era portfolios ──
+    old_bal = base.get("initial_balance", 0)
+    if old_bal < STARTING_BALANCE and old_bal > 0:
+        # Old options portfolio ($500) → reset to ES futures ($10,000)
+        base = _default_pf()
+        base["_migrated_from_options"] = True
     base["positions"] = base.get("positions") or {}
     base["history"] = base.get("history") or []
     base["trade_log"] = base.get("trade_log") or []
+
     # Auto-recover: rebuild trade_log from history when trade_log is empty
     if not base["trade_log"] and base["history"]:
         recovered = []
@@ -407,16 +414,15 @@ def _normalize_pf(pf):
                 "entry_time": h.get("entry_time") or h.get("time"),
                 "exit_time": h.get("exit_time"),
                 "direction": h.get("direction"),
-                "K_buy": h.get("K_buy"),
-                "K_sell": h.get("K_sell"),
+                "es_direction": h.get("es_direction"),
+                "instrument": h.get("instrument", "ES"),
+                "entry_price": h.get("entry_price", h.get("entry_spy")),
+                "exit_price": h.get("exit_price", h.get("exit_spy")),
                 "contracts": h.get("contracts"),
-                "entry_spy": h.get("entry_spy"),
-                "exit_spy": h.get("exit_spy"),
-                "net_debit": h.get("net_debit"),
-                "exit_val": h.get("exit_val"),
+                "sl_price": h.get("sl_price"),
+                "tp_price": h.get("tp_price"),
+                "margin_locked": h.get("margin_locked"),
                 "exit_type": h.get("exit_type"),
-                "cost": h.get("cost"),
-                "revenue": h.get("revenue"),
                 "pnl": h.get("pnl"),
                 "realized_pnl": h.get("realized_pnl"),
                 "pnl_pct": h.get("pnl_pct"),
@@ -576,7 +582,7 @@ def _trade_signature(record):
     if tid:
         return str(tid)
     entry = record.get("entry_time") or record.get("time")
-    return f"{record.get('date')}-{entry}-{record.get('direction')}-{record.get('K_buy')}-{record.get('K_sell')}"
+    return f"{record.get('date')}-{entry}-{record.get('direction')}-{record.get('entry_price', record.get('K_buy'))}-{record.get('es_direction', '')}"
 
 
 def _ensure_trade_id(record):
@@ -586,7 +592,7 @@ def _ensure_trade_id(record):
         record["entry_time"] = record["time"]
     if not record.get("trade_id"):
         entry = record.get("entry_time") or record.get("time") or "00:00"
-        record["trade_id"] = f"{record.get('date')}-{entry}-{record.get('direction')}-{record.get('K_buy')}"
+        record["trade_id"] = f"{record.get('date')}-{entry}-ES-{record.get('es_direction', record.get('direction', 'UNK'))}"
     return record
 
 
@@ -673,7 +679,7 @@ def _ledger_dedupe_key(row):
         return f"{st}:{tid}"
     return (
         f"{st}:{row.get('date')}:{row.get('direction')}:"
-        f"{row.get('K_buy')}:{row.get('K_sell')}:{row.get('exit_time') or row.get('logged_at', '')}"
+        f"{row.get('entry_price', row.get('K_buy'))}:{row.get('es_direction', '')}:{row.get('exit_time') or row.get('logged_at', '')}"
     )
 
 
@@ -691,11 +697,11 @@ def _has_close_row(rows, record):
     tid = record.get("trade_id")
     if tid and any(r.get("trade_id") == tid and r.get("display_status") == "CLOSE" for r in rows):
         return True
-    sig = (record.get("date"), record.get("direction"), record.get("K_buy"), record.get("K_sell"), record.get("exit_time"))
+    sig = (record.get("date"), record.get("direction"), record.get("entry_price", record.get("K_buy")), record.get("es_direction", ""), record.get("exit_time"))
     for r in rows:
         if r.get("display_status") != "CLOSE":
             continue
-        if (r.get("date"), r.get("direction"), r.get("K_buy"), r.get("K_sell"), r.get("exit_time")) == sig:
+        if (r.get("date"), r.get("direction"), r.get("entry_price", r.get("K_buy")), r.get("es_direction", ""), r.get("exit_time")) == sig:
             return True
     return False
 
@@ -847,15 +853,13 @@ def _record_position_close(portfolio, open_pos, today_str, now, spy_p, exit_val,
         "entry_time": open_pos.get("entry_time"),
         "exit_time": open_pos.get("exit_time"),
         "direction": open_pos.get("direction"),
-        "K_buy": open_pos.get("K_buy"),
-        "K_sell": open_pos.get("K_sell"),
+        "es_direction": open_pos.get("es_direction"),
+        "instrument": open_pos.get("instrument", "ES"),
         "contracts": open_pos.get("contracts"),
-        "entry_spy": open_pos.get("entry_spy"),
-        "exit_spy": open_pos.get("exit_spy"),
-        "net_debit": open_pos.get("net_debit"),
-        "exit_val": open_pos.get("exit_val"),
+        "entry_price": open_pos.get("entry_price"),
+        "exit_price": open_pos.get("exit_price"),
         "exit_type": open_pos.get("exit_type"),
-        "cost": open_pos.get("cost"),
+        "margin_locked": open_pos.get("margin_locked"),
         "revenue": open_pos.get("revenue"),
         "pnl": open_pos.get("pnl"),
         "pnl_pct": open_pos.get("pnl_pct"),
@@ -1246,10 +1250,11 @@ class handler(BaseHTTPRequestHandler):
                     "entry_time": pos.get("entry_time"),
                     "exit_time": pos.get("exit_time"),
                     "direction": pos.get("direction"),
-                    "K_buy": pos.get("K_buy"),
-                    "K_sell": pos.get("K_sell"),
+                    "es_direction": pos.get("es_direction"),
+                    "entry_price": pos.get("entry_price"),
+                    "exit_price": pos.get("exit_price"),
                     "exit_type": pos.get("exit_type"),
-                    "cost": pos.get("cost"),
+                    "margin_locked": pos.get("margin_locked"),
                     "revenue": pos.get("revenue"),
                     "pnl": pos.get("pnl"),
                     "realized_pnl": pos.get("realized_pnl"),

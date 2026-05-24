@@ -678,7 +678,7 @@ function rowCompleteness(h) {
 function ledgerDedupeKey(h) {
   const st = h.display_status || h.event || '?';
   if (h.trade_id) return `${st}:${h.trade_id}`;
-  return `${st}:${h.date}:${h.direction}:${h.K_buy}:${h.K_sell}:${h.exit_time || h.logged_at || ''}`;
+  return `${st}:${h.date}:${h.direction}:${h.entry_price||h.K_buy||''}:${h.es_direction||''}:${h.exit_time || h.logged_at || ''}`;
 }
 
 function dedupeLedgerRows(rows) {
@@ -715,8 +715,9 @@ function buildRecentTrades(pt) {
   const hasClose = (h) => rows.some(r => {
     if (r.display_status !== 'CLOSE') return false;
     if (h.trade_id && r.trade_id === h.trade_id) return true;
-    return r.date === h.date && r.direction === h.direction && r.K_buy === h.K_buy
-      && r.K_sell === h.K_sell && r.exit_time === h.exit_time;
+    return r.date === h.date && r.direction === h.direction
+      && (r.entry_price === h.entry_price || (r.K_buy === h.K_buy && r.K_sell === h.K_sell))
+      && r.exit_time === h.exit_time;
   });
   for (const h of (pt.history || [])) {
     if (hasClose(h)) continue;
@@ -743,7 +744,10 @@ function isOpenTradeRow(h) {
 }
 
 function tradeRowPnl(h, isOpen) {
-  if (isOpen) return { value: h.cost || 0, label: `$${(h.cost || 0).toFixed(0)}`, isWin: null };
+  if (isOpen) {
+    const margin = h.margin_locked || h.cost || 0;
+    return { value: margin, label: `$${margin.toFixed(0)} margin`, isWin: null };
+  }
   const pnl = h.realized_pnl ?? h.pnl ?? 0;
   return { value: pnl, label: `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}`, isWin: pnl > 0 };
 }
@@ -826,71 +830,57 @@ function render(py) {
   // Briefing
   document.getElementById('briefing').textContent = py.briefing || '--';
 
-  // Strike Recommendation
-  const sr = py.strike_recommendation;
+  // ES Futures Trade Signal
   const srWidget = document.getElementById('strikeWidget');
-  if (sr && sr.active) {
+  const of2 = py.order_flow;
+  const sig2 = py.signal || {};
+  if (of2 && sig2.grade && sig2.grade !== 'NONE' && py.direction_bias !== 'NEUTRAL') {
     srWidget.style.display = 'block';
     const srcEl = document.getElementById('strikeSource');
-    srcEl.textContent = sr.data_source === 'LIVE' ? 'LIVE DATA' : 'ESTIMATED';
-    srcEl.className = 'strike-source ' + (sr.data_source === 'LIVE' ? 'source-live' : 'source-est');
+    srcEl.textContent = 'SIMULATED DOM';
+    srcEl.className = 'strike-source source-est';
     
-    // Show FlashAlpha data if available
-    if (py.flashalpha) {
-      const fa = py.flashalpha;
-      srcEl.textContent += ` + FlashAlpha`;
-      if (fa.vwap) {
-        srcEl.title = `VWAP: $${fa.vwap.toFixed(2)}, Bid/Ask: $${fa.bid}/$${fa.ask}`;
-      }
-    }
-
-    document.getElementById('strikeContractName').textContent = sr.contract_label;
-    const dirColor = sr.direction === 'CALL' ? 'var(--go)' : 'var(--stop)';
+    const esDir = py.direction_bias === 'CALL' ? 'LONG' : 'SHORT';
+    const dirColor = py.direction_bias === 'CALL' ? 'var(--go)' : 'var(--stop)';
+    document.getElementById('strikeContractName').textContent = `ES ${esDir} — $50/pt`;
     document.getElementById('strikeContractSub').innerHTML =
-      `<span style="color:${dirColor};font-weight:700">${sr.direction}</span> &bull; ` +
-      `Premium: <span class="mono" style="font-weight:700">$${sr.est_premium_low.toFixed(2)} — $${sr.est_premium_high.toFixed(2)}</span>`;
+      `<span style="color:${dirColor};font-weight:700">${esDir}</span> &bull; ` +
+      `Center: <span class="mono" style="font-weight:700">${(of2.center_price||0).toFixed(2)}</span> &bull; ` +
+      `CVD: <span class="mono" style="color:${(of2.cvd||0)>0?'var(--go)':'var(--stop)';font-weight:700">${(of2.cvd_pct||0)>0?'+':''}${of2.cvd_pct||0}%</span>`;
 
-    document.getElementById('strikeTable').innerHTML = (sr.strikes || []).map(s => {
-      const isRec = s.recommended;
-      return `<div class="strike-table-row ${isRec ? 'recommended' : ''}">
-        <span class="strike-table-label" style="${isRec ? 'color:var(--info);font-weight:900' : ''}">${isRec ? '👉 ' : ''}${s.label}</span>
-        <span class="strike-table-val mono" style="${isRec ? 'color:var(--info);font-weight:900;font-size:1.1em' : ''}">$${s.strike}</span>
-        ${isRec ? '<span class="strike-table-tag" style="background:var(--info);color:#000">✓ RECOMMENDED</span>' : ''}
-      </div>`;
-    }).join('');
+    document.getElementById('strikeTable').innerHTML = '';
 
     document.getElementById('strikeMetrics').innerHTML = `
       <div class="strike-metric">
-        <span class="strike-metric-label">🎯 Target (+${sr.target_pct}%)</span>
-        <span class="strike-metric-value mono" style="color:var(--go)">$${sr.target_price.toFixed(2)}</span>
+        <span class="strike-metric-label">📊 Signal Grade</span>
+        <span class="strike-metric-value mono" style="color:${sig2.color||'var(--text)'}">${sig2.grade}</span>
       </div>
       <div class="strike-metric">
-        <span class="strike-metric-label">🛡 Stop (-${sr.stop_pct}%)</span>
-        <span class="strike-metric-value mono" style="color:var(--stop)">$${sr.stop_price.toFixed(2)}</span>
+        <span class="strike-metric-label">🎯 Score</span>
+        <span class="strike-metric-value mono">${py.total_score||0}/${py.max_score||110}</span>
       </div>
       <div class="strike-metric">
-        <span class="strike-metric-label">⚖️ Risk/Reward</span>
-        <span class="strike-metric-value mono" style="color:var(--cyan)">${sr.risk_reward}</span>
+        <span class="strike-metric-label">📈 VIX Regime</span>
+        <span class="strike-metric-value mono">${of2.vix_regime || 'NORMAL'}</span>
       </div>
       <div class="strike-metric">
-        <span class="strike-metric-label">💰 Max Contracts</span>
-        <span class="strike-metric-value mono">${sr.max_contracts}x</span>
+        <span class="strike-metric-label">⚖️ Book Bias</span>
+        <span class="strike-metric-value mono" style="color:${dirColor}">${of2.total_bids||0} vs ${of2.total_asks||0}</span>
       </div>
       <div class="strike-metric">
-        <span class="strike-metric-label">💵 Cost/Contract</span>
-        <span class="strike-metric-value mono">$${sr.cost_per_contract.toFixed(0)}</span>
+        <span class="strike-metric-label">💰 Margin/Contract</span>
+        <span class="strike-metric-value mono">$500</span>
       </div>
       <div class="strike-metric">
-        <span class="strike-metric-label">⚠️ Max Risk</span>
-        <span class="strike-metric-value mono" style="color:var(--warn)">$${sr.max_risk_dollars.toFixed(0)} (${sr.max_risk_pct}%)</span>
+        <span class="strike-metric-label">⚠️ Multiplier</span>
+        <span class="strike-metric-value mono" style="color:var(--warn)">$50/point</span>
       </div>
     `;
 
-    document.getElementById('strikeReasoning').innerHTML = `💡 ${sr.reasoning}`;
+    document.getElementById('strikeReasoning').innerHTML = `💡 ${sig2.action || 'Awaiting signal'}`;
   } else {
     srWidget.style.display = 'none';
   }
-
   // ES Futures DOM Order Flow Rendering
   const ocWidget = document.getElementById('optionChainWidget');
   const of = py.order_flow;
@@ -1340,7 +1330,7 @@ function renderTradeList(hist, maxAbsPnl, filter) {
         <div class="th-card-left">
           <span class="th-card-dir ${dirClass}">${h.direction==='CALL'?'LONG':h.direction==='PUT'?'SHORT':(h.direction||'--')}</span>
           <div class="th-card-info">
-            <span class="th-card-strikes">${h.K_buy||'--'}/${h.K_sell||'--'} <span style="color:var(--muted);font-weight:400;font-size:0.6rem">x${contracts}</span></span>
+            <span class="th-card-strikes">ES @ ${(h.entry_price||0).toFixed?.(2)||'--'} <span style="color:var(--muted);font-weight:400;font-size:0.6rem">x${contracts}</span></span>
             <span class="th-card-meta">
               <span>${dateStr}</span>
               <span>${isOpen ? entryTime : entryTime + ' → ' + exitTime}</span>
