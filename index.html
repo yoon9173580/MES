@@ -461,6 +461,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
 
   <!-- Briefing -->
   <div class="briefing-bar" id="briefing">Connecting to signal engine...</div>
+  <div id="macroBanner" style="display:none;border-radius:10px;padding:8px 14px;margin-bottom:1rem;font-size:0.78rem;font-weight:600;text-align:center"></div>
 
   <!-- Strike Recommendation -->
   <div class="strike-box" id="strikeWidget" style="display:none">
@@ -654,6 +655,7 @@ function colorToRgba(color, alpha) {
 function renderLayerBars(layers) {
   const defs = [
     {key:'regime', name:'Regime', max:40},
+    {key:'options_flow', name:'Opt Flow', max:30},
     {key:'correlation', name:'Correlat.', max:20},
     {key:'time_window', name:'Time Win', max:20},
     {key:'technical', name:'Technical', max:30},
@@ -662,14 +664,35 @@ function renderLayerBars(layers) {
   el.innerHTML = defs.map(d => {
     const l = layers?.[d.key];
     const score = l?.score ?? 0;
+    const noData = d.key === 'options_flow' && l?.status === 'NO_DATA';
     const pct = Math.max(0, Math.min(100, (score / d.max) * 100));
-    const color = pct >= 70 ? 'var(--go)' : pct >= 40 ? 'var(--warn)' : 'var(--stop)';
+    const color = noData ? '#445' : (pct >= 70 ? 'var(--go)' : pct >= 40 ? 'var(--warn)' : 'var(--stop)');
+    const displayScore = noData ? '—' : `${score}/${d.max}`;
     return `<div class="layer-row">
       <span class="layer-name">${d.name}</span>
       <div class="layer-bar-bg"><div class="layer-bar-fill" style="width:${pct}%;background:${color}"></div></div>
-      <span class="layer-score mono" style="color:${color}">${score}/${d.max}</span>
+      <span class="layer-score mono" style="color:${color}">${displayScore}</span>
     </div>`;
   }).join('');
+}
+
+// Macro gate banner — surfaces FOMC / CPI / NFP / PPI windows.
+function renderMacroBanner(layers) {
+  const m = layers?.macro_gate;
+  const el = document.getElementById('macroBanner');
+  if (!el) return;
+  if (!m || m.status === 'CLEAR') {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  const bgMap = { BLOCKED: '#3d1a1a', WARNING: '#2a1f0a' };
+  const fgMap = { BLOCKED: '#ff7070', WARNING: '#f0a23a' };
+  const borderMap = { BLOCKED: '#6b1b1b', WARNING: '#6b4a1b' };
+  el.style.background = bgMap[m.status] || '#1a1a2e';
+  el.style.color = fgMap[m.status] || '#8899cc';
+  el.style.border = `1px solid ${borderMap[m.status] || '#2a2a3e'}`;
+  el.textContent = m.detail || '';
 }
 
 function rowCompleteness(h) {
@@ -807,6 +830,7 @@ function render(py) {
 
   // Layer Bars
   renderLayerBars(py.layers);
+  renderMacroBanner(py.layers);
 
   // Time Window
   const tw = py.layers?.time_window;
@@ -1378,6 +1402,39 @@ function renderBacktestSummary(py) {
       </div>
     </div>
 
+    <!-- 2022 Bear Market Stress Test -->
+    ${bs.bear_market_2022 ? `
+    <div style="margin-top:10px;background:#1a0f1f;border:1px solid #4a1f3f;border-radius:10px;padding:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:10px;color:#c084fc;font-weight:700;letter-spacing:.1em;text-transform:uppercase">
+          🐻 2022 Bear Market (Projection)
+        </div>
+        <span style="font-size:9px;color:#f0a23a;background:#2a1f0a;padding:2px 8px;border-radius:10px">${bs.bear_market_2022.status || 'BACKTEST'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;font-size:11px">
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">WR</div>
+          <div style="color:#3dd68c;font-weight:700">${bs.bear_market_2022.win_rate}%</div>
+        </div>
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">PF</div>
+          <div style="color:#60a5fa;font-weight:700">${bs.bear_market_2022.profit_factor}</div>
+        </div>
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">DD</div>
+          <div style="color:#f0a23a;font-weight:700">${bs.bear_market_2022.max_drawdown_pct}%</div>
+        </div>
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">Return</div>
+          <div style="color:#c084fc;font-weight:700">+${bs.bear_market_2022.annual_return_pct}%</div>
+        </div>
+      </div>
+      <div style="margin-top:6px;font-size:9px;color:#667">
+        ${bs.bear_market_2022.total_trades}건 (VIX>25 필터로 약 70% 거래 차단) · VIX 평균 ${bs.bear_market_2022.vix_avg}
+      </div>
+    </div>
+    ` : ''}
+
     <!-- MES Contract Specs Row -->
     ${ms ? `
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
@@ -1403,6 +1460,139 @@ function renderBacktestSummary(py) {
     <div style="margin-top:8px;padding:10px 14px;background:#3d1a1a;border:1px solid #6b1b1b;border-radius:10px;color:#ff7070;font-size:12px;font-weight:600;text-align:center">
       ⛔ DAILY LOSS LIMIT HIT (${py.daily_drawdown_pct}%) — TRADING HALTED FOR TODAY
     </div>` : ''}
+
+    <!-- Trade Distribution Scatter Charts -->
+    ${renderDistributionCharts(py)}
+  `;
+}
+
+// ── 거래 분포 산점도 (Score×PnL + Time×PnL) ──
+function renderDistributionCharts(py) {
+  const pt = py.paper_trading || {};
+  const hist = (pt.history || []).filter(h =>
+    (h.status === 'CLOSED' || h.pnl_locked) && h.pnl != null
+  );
+
+  if (hist.length < 3) {
+    return `<div style="margin-top:12px;padding:14px;background:#0c1428;border:1px solid #1a3060;border-radius:12px;text-align:center;color:#556;font-size:11px">
+      📈 거래 분포 차트는 3건 이상 누적 후 표시됩니다 (현재 ${hist.length}건)
+    </div>`;
+  }
+
+  // Common SVG dims
+  const W = 320, H = 140, PAD = 26;
+  const innerW = W - PAD * 2;
+  const innerH = H - PAD - 20;
+
+  // ── Chart 1: Score × PnL ──
+  const scoreData = hist
+    .filter(h => h.score != null)
+    .map(h => ({ x: h.score, y: h.pnl, win: h.pnl > 0 }));
+
+  let chart1 = '';
+  if (scoreData.length > 0) {
+    const xMin = 60, xMax = 100;
+    const ys = scoreData.map(d => d.y);
+    const yMin = Math.min(...ys, 0);
+    const yMax = Math.max(...ys, 0);
+    const yRange = (yMax - yMin) || 1;
+    const xScale = v => PAD + ((v - xMin) / (xMax - xMin)) * innerW;
+    const yScale = v => PAD + innerH - ((v - yMin) / yRange) * innerH;
+    const zeroY = yScale(0);
+
+    const points = scoreData.map(d => {
+      const cx = xScale(d.x);
+      const cy = yScale(d.y);
+      const color = d.win ? '#3dd68c' : '#ff7070';
+      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.5" fill="${color}" opacity="0.75"/>`;
+    }).join('');
+
+    // X gridlines at 70/80/90/100
+    const xTicks = [70, 80, 90, 100].map(v => `
+      <line x1="${xScale(v)}" y1="${PAD}" x2="${xScale(v)}" y2="${PAD + innerH}" stroke="#1a2a44" stroke-dasharray="2,3"/>
+      <text x="${xScale(v)}" y="${H - 4}" text-anchor="middle" font-size="8" fill="#445">${v}</text>
+    `).join('');
+
+    // Sweet spot highlight (90-100)
+    const sweetX1 = xScale(90), sweetX2 = xScale(100);
+    const sweetBox = `<rect x="${sweetX1}" y="${PAD}" width="${sweetX2 - sweetX1}" height="${innerH}" fill="#1e6b3f" opacity="0.08"/>`;
+
+    chart1 = `
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+        ${sweetBox}
+        ${xTicks}
+        <line x1="${PAD}" y1="${zeroY}" x2="${PAD + innerW}" y2="${zeroY}" stroke="#334" stroke-width="0.8"/>
+        ${points}
+        <text x="${PAD}" y="${PAD - 6}" font-size="9" fill="#8899cc" font-weight="700">Score × PnL</text>
+        <text x="${W - PAD}" y="${PAD - 6}" text-anchor="end" font-size="8" fill="#556">Sweet 90-100</text>
+      </svg>`;
+  }
+
+  // ── Chart 2: Time-of-day × PnL ──
+  const timeData = hist
+    .filter(h => h.entry_time)
+    .map(h => {
+      const [hh, mm] = (h.entry_time || '0:0').split(':').map(Number);
+      return { x: (hh || 0) * 60 + (mm || 0), y: h.pnl, win: h.pnl > 0 };
+    });
+
+  let chart2 = '';
+  if (timeData.length > 0) {
+    const xMin = 570, xMax = 960;  // 9:30~16:00
+    const ys = timeData.map(d => d.y);
+    const yMin = Math.min(...ys, 0);
+    const yMax = Math.max(...ys, 0);
+    const yRange = (yMax - yMin) || 1;
+    const xScale = v => PAD + ((v - xMin) / (xMax - xMin)) * innerW;
+    const yScale = v => PAD + innerH - ((v - yMin) / yRange) * innerH;
+    const zeroY = yScale(0);
+
+    const points = timeData.map(d => {
+      const cx = xScale(d.x);
+      const cy = yScale(d.y);
+      const color = d.win ? '#3dd68c' : '#ff7070';
+      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.5" fill="${color}" opacity="0.75"/>`;
+    }).join('');
+
+    const xTicks = [
+      [570, '9:30'], [630, '10:30'], [720, '12:00'], [840, '14:00'], [930, '15:30']
+    ].map(([v, label]) => `
+      <line x1="${xScale(v)}" y1="${PAD}" x2="${xScale(v)}" y2="${PAD + innerH}" stroke="#1a2a44" stroke-dasharray="2,3"/>
+      <text x="${xScale(v)}" y="${H - 4}" text-anchor="middle" font-size="8" fill="#445">${label}</text>
+    `).join('');
+
+    // PRIME window highlight (10:30 - 11:30 = 630-690)
+    const primeX1 = xScale(630), primeX2 = xScale(690);
+    const primeBox = `<rect x="${primeX1}" y="${PAD}" width="${primeX2 - primeX1}" height="${innerH}" fill="#1e6b3f" opacity="0.08"/>`;
+
+    chart2 = `
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+        ${primeBox}
+        ${xTicks}
+        <line x1="${PAD}" y1="${zeroY}" x2="${PAD + innerW}" y2="${zeroY}" stroke="#334" stroke-width="0.8"/>
+        ${points}
+        <text x="${PAD}" y="${PAD - 6}" font-size="9" fill="#8899cc" font-weight="700">Entry Time × PnL</text>
+        <text x="${W - PAD}" y="${PAD - 6}" text-anchor="end" font-size="8" fill="#556">PRIME 10:30-11:30</text>
+      </svg>`;
+  }
+
+  // Win/Loss summary
+  const wins = hist.filter(h => h.pnl > 0).length;
+  const losses = hist.length - wins;
+
+  return `
+    <div style="margin-top:12px">
+      <div style="font-size:10px;color:#8899cc;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">
+        📈 Trade Distribution &nbsp;<span style="color:#556;font-weight:400">${hist.length} closed · ${wins}W ${losses}L</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="background:#0c1428;border:1px solid #1a3060;border-radius:10px;padding:8px">${chart1}</div>
+        <div style="background:#0c1428;border:1px solid #1a3060;border-radius:10px;padding:8px">${chart2}</div>
+      </div>
+      <div style="margin-top:6px;font-size:9px;color:#445;text-align:center">
+        🟢 wins &nbsp; 🔴 losses &nbsp; · &nbsp; shaded = optimal zone
+      </div>
+    </div>
   `;
 }
 
@@ -1810,9 +2000,13 @@ async function loadData() {
   }
 
   try {
-    // We have local flag + will check server cookie
-    let r = await fetch('/api/data', { cache: 'no-store', credentials: 'include' });
-    
+    // We have local flag + will check server cookie.
+    // Send If-None-Match so the server can answer 304 if the signal
+    // didn't move — saves bandwidth and CPU during quiet windows.
+    const headers = {};
+    if (window.__lastEtag) headers['If-None-Match'] = window.__lastEtag;
+    let r = await fetch('/api/data', { cache: 'no-store', credentials: 'include', headers });
+
     if (r.status === 401) {
       sessionStorage.removeItem('hannae_auth_ok');
       stopDataPolling();
@@ -1820,13 +2014,27 @@ async function loadData() {
       showGoogleAuthModal(respData.google_client_id || '729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com');
       return;
     }
-    
+
+    // Capture server-supplied polling cadence (X-Next-Poll header).
+    const nextPollHeader = r.headers.get('X-Next-Poll');
+    const serverPollSec = nextPollHeader ? Math.max(2, parseInt(nextPollHeader, 10)) : null;
+
+    if (r.status === 304) {
+      // Nothing changed since last poll — just re-schedule.
+      if (serverPollSec) startDataPolling(serverPollSec * 1000);
+      return;
+    }
+
     if (!r.ok) {
       // Fallback for local/offline demo
       r = await fetch('data.json', {cache:'no-store'});
     }
-    
+
     if (r.ok) {
+      // Stash ETag for next conditional request.
+      const etag = r.headers.get('ETag');
+      if (etag) window.__lastEtag = etag;
+
       const data = await r.json();
       data.latency_ms = Math.round((data.latency_ms||0) + (performance.now()-t0));
       render(data);
@@ -1841,25 +2049,23 @@ async function loadData() {
         startInactivityProtection();
       }
 
-      // Smart polling: active during regular + extended hours (pre/after)
+      // Adaptive polling — use server-supplied next_poll_sec (already
+      // tuned by market state + signal grade) instead of hard-coded
+      // intervals. Server returns 3s when STRONG signal active, 5s in
+      // regular hours, 15s extended, 60s closed.
+      const intervalMs = (data.next_poll_sec || serverPollSec || 5) * 1000;
       const marketStatus = data.market_status || 'regular';
-
-      // Since Options API is disabled by default (ENABLE_OPTIONS_API=false),
-      // we can afford more aggressive polling during regular market hours.
-      // User plans to run this for ~3 months of live trading.
-      if (marketStatus === 'regular') {
-        startDataPolling(8000);                     // 8 seconds during core hours (aggressive, Options API disabled)
-      } else if (marketStatus === 'pre_market' || marketStatus === 'after_hours') {
-        startDataPolling(5 * 60 * 1000);            // 5 minutes during extended hours (cost priority)
-      } else {
-        // Fully closed (night/weekends) → minimal or no polling
+      if (marketStatus === 'closed' && intervalMs >= 60000) {
+        // Fully closed: skip polling entirely
         stopDataPolling();
+      } else {
+        startDataPolling(intervalMs);
       }
 
       return; // important: do not fall through
     }
-  } catch(e) { 
-    console.error('Fetch error:', e); 
+  } catch(e) {
+    console.error('Fetch error:', e);
   }
 
   // Fallback polling (used when previous data fetch had error)

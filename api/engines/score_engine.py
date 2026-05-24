@@ -22,6 +22,8 @@ from engines.time_window import calculate_time_score
 from engines.technical import calculate_technical_score
 from engines.risk_manager import check_risk_rules
 from engines.ml_weights import get_ml_multipliers
+from engines.macro_gate import calculate_macro_gate
+from engines.options_flow import calculate_options_flow_score
 
 
 # ── Signal Grade Thresholds (loaded from env for security / easy tuning) ──
@@ -108,15 +110,8 @@ def run_score_engine(now_et: datetime,
     layers = {}
     is_market_open = session_name == "REGULAR"
 
-    # ── LAYER 1: Macro Gate [Future Implementation] ─────────────
-    # Placeholder — will integrate economic calendar API
-    layers["macro_gate"] = {
-        "score": 0,
-        "max": 0,
-        "status": "NOT_IMPLEMENTED",
-        "detail": "Macro calendar not yet connected",
-        "gate_passed": True,  # Default pass until implemented
-    }
+    # ── LAYER 1: Macro Gate (FOMC/CPI/NFP/PPI) ───────────────────
+    layers["macro_gate"] = calculate_macro_gate(now_et)
 
     # ── LAYER 2: Market Regime ──────────────────────────────────
     layers["regime"] = calculate_regime_score(
@@ -127,14 +122,8 @@ def run_score_engine(now_et: datetime,
         spy_history=spy_history,
     )
 
-    # ── LAYER 3: Options Flow [Future Implementation] ───────────
-    # Placeholder — will integrate Unusual Whales API
-    layers["options_flow"] = {
-        "score": 0,
-        "max": 30,
-        "status": "NOT_IMPLEMENTED",
-        "detail": "Options flow data not yet connected",
-    }
+    # ── LAYER 3: Options Flow (Yahoo SPY chain) ──────────────────
+    layers["options_flow"] = calculate_options_flow_score("SPY")
 
     # ── LAYER 4: Correlation ────────────────────────────────────
     layers["correlation"] = calculate_correlation_score(pcts)
@@ -168,21 +157,28 @@ def run_score_engine(now_et: datetime,
             layers[layer_key]["score"] = min(m, int(s * ml.get(layer_key, 1.0)))
 
     # Sum layers 2 + 4 + 5 + 6 (Layer 1 = gate, Layer 3 = future, Layer 7 = lockout)
+    # Options flow only counts when data is live (NO_DATA → skip).
+    of_live = layers["options_flow"].get("status") == "LIVE"
     active_scores = [
         layers["regime"]["score"],
         layers["correlation"]["score"],
         layers["time_window"]["score"],
         layers["technical"]["score"],
     ]
+    if of_live:
+        active_scores.append(layers["options_flow"]["score"])
     total_score = sum(active_scores)
 
-    # Current max (excluding Layer 3 which is not implemented)
+    # Max is computed dynamically — when options flow data isn't available,
+    # the score is normalized against only the layers that voted.
     active_max = (
         layers["regime"]["max"] +
         layers["correlation"]["max"] +
         layers["time_window"]["max"] +
         layers["technical"]["max"]
     )  # = 40 + 20 + 20 + 30 = 110
+    if of_live:
+        active_max += layers["options_flow"]["max"]  # +30 → 140
 
     # Normalize score to 0-100 scale for signal grade
     normalized = int((total_score / active_max) * 100) if active_max > 0 else 0
@@ -241,6 +237,18 @@ def run_score_engine(now_et: datetime,
             "label": "RUNAWAY VETO",
             "emoji": "⚠️",
             "action": f"Vetoed: {runaway_reason} — Runway trend danger",
+            "color": "#f07178",
+        }
+        normalized = 0
+
+    # ── MACRO GATE OVERRIDE ─────────────────────────────────────
+    # FOMC/CPI/NFP/PPI 발표 윈도우 진입 시 신호 봉쇄.
+    if not layers["macro_gate"]["gate_passed"]:
+        signal = {
+            "grade": "LOCKED",
+            "label": f"MACRO {layers['macro_gate']['active_event']}",
+            "emoji": "🚫",
+            "action": layers["macro_gate"]["detail"],
             "color": "#f07178",
         }
         normalized = 0
