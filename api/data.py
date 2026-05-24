@@ -1034,18 +1034,32 @@ ALLOWED_ORIGINS = {
 }
 
 def _verify_google_token(id_token):
-    """Verify Google Sign-In JWT token using Google OAuth2 tokeninfo endpoint."""
+    """Verify Google Sign-In JWT via Google tokeninfo endpoint."""
     if not id_token:
         return None
     try:
-        r = requests.get(f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}", timeout=5)
-        if r.status_code == 200:
-            payload = r.json()
-            # Basic validation
-            if payload.get("email_verified") == "true" or payload.get("email_verified") is True:
-                return payload
+        r = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": id_token},
+            timeout=8
+        )
+        if r.status_code != 200:
+            print(f"[Google Token] tokeninfo HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        payload = r.json()
+        # Must be email-verified
+        email_ok = payload.get("email_verified") in ("true", True)
+        if not email_ok:
+            print("[Google Token] email not verified")
+            return None
+        # Must be issued for our client_id
+        expected_aud = os.getenv("GOOGLE_CLIENT_ID", "729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com")
+        if payload.get("aud") != expected_aud:
+            print(f"[Google Token] aud mismatch: {payload.get('aud')} vs {expected_aud}")
+            return None
+        return payload
     except Exception as e:
-        print(f"[Google ID Token Verification Error] {e}")
+        print(f"[Google Token Error] {e}")
     return None
 
 class handler(BaseHTTPRequestHandler):

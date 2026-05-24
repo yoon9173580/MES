@@ -1,11 +1,10 @@
 {
+  "version": 2,
   "builds": [
     {
       "src": "api/data.py",
       "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+      "config": { "maxLambdaSize": "50mb" }
     },
     {
       "src": "index.html",
@@ -13,17 +12,9 @@
     }
   ],
   "routes": [
-    {
-      "src": "/api/data",
-      "dest": "/api/data.py"
-    },
-    {
-      "src": "/api/unlock",
-      "dest": "/api/data.py"
-    },
-    {
-      "src": "/api/logout",
-      "dest": "/api/data.py"
-    }
+    { "src": "/api/data",   "dest": "/api/data.py" },
+    { "src": "/api/unlock", "dest": "/api/data.py" },
+    { "src": "/api/logout", "dest": "/api/data.py" },
+    { "src": "/(.*)",       "dest": "/index.html"  }
   ]
 }
