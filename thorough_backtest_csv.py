@@ -110,6 +110,8 @@ def run_thorough_csv_backtest(csv_path: str, start_str: str = "2024-05-01", end_
     trades = []
     wins, losses = 0, 0
     r_rate = 0.05
+    consecutive_losses = 0
+    lockout_cooldown = 0
     
     # SPREAD PARAMETERS
     SPREAD_WIDTH = 5.0
@@ -120,6 +122,10 @@ def run_thorough_csv_backtest(csv_path: str, start_str: str = "2024-05-01", end_
     pbar = tqdm(trading_days, desc="Backtesting Days")
     
     for day_str in pbar:
+        # Check consecutive losses lockout (Applying original 3-Strike Lockout: cool-down for 3 trading days)
+        if lockout_cooldown > 0:
+            lockout_cooldown -= 1
+            continue
         day_bars = days_dict[day_str]
         if len(day_bars) < 60: # need sufficient intraday bars
             continue
@@ -233,16 +239,19 @@ def run_thorough_csv_backtest(csv_path: str, start_str: str = "2024-05-01", end_
         spy_range_pct = (range_morning / spy_o) * 100 if spy_o > 0 else 0
         slip = dynamic_slippage(vix_val, spy_range_pct)
         net_debit = (long_entry - short_entry) * (1 + SPREAD_PCT) + slip * 2
-        
         if net_debit <= 0.05:
             continue
-            
         tp_price = net_debit * (1 + TP_PCT)
         
-        # Sizing
-        risk_pct = 0.10 if normalized >= 95 else 0.05
-        max_risk = balance * risk_pct
-        num_contracts = max(1, int(max_risk / (net_debit * 100)))
+        # Sizing (Applying original Layer 7 Risk Manager: strictly 2.0% max trade loss)
+        max_risk = balance * 0.02
+        num_contracts = int(max_risk / (net_debit * 100))
+        if num_contracts == 0:
+            # Allow 1 contract for small accounts if it doesn't exceed 10% of total balance
+            if net_debit * 100 <= balance * 0.10:
+                num_contracts = 1
+            else:
+                continue
         
         # ── MINUTE-BY-MINUTE SIMULATION ──
         exit_val = None
@@ -294,8 +303,21 @@ def run_thorough_csv_backtest(csv_path: str, start_str: str = "2024-05-01", end_
         balance += total_pnl
         if total_pnl > 0:
             wins += 1
+            consecutive_losses = 0
         else:
             losses += 1
+            consecutive_losses += 1
+            
+            # Apply consecutive loss lockout (3 strikes)
+            if consecutive_losses >= 3:
+                lockout_cooldown = 3
+                consecutive_losses = 0
+                
+            # Apply daily loss limit (MAX_DAILY_LOSS_PCT = 6.0%)
+            # If today's loss exceeds 6% of the balance prior to this trade, lock trading for 3 days
+            prev_balance = balance - total_pnl
+            if prev_balance > 0 and abs(total_pnl) / prev_balance >= 0.06:
+                lockout_cooldown = 3
             
         trades.append({
             "date": day_str,
