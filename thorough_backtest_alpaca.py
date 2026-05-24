@@ -285,7 +285,7 @@ if __name__ == "__main__":
         end_dt = datetime.strptime(args.end, "%Y-%m-%d")
 
     if args.start is None:
-        # Default to 1 year (good balance between data size and usefulness)
+        # Default to last 1 year with 1Min (as requested)
         start_dt = end_dt - timedelta(days=365)
     else:
         start_dt = datetime.strptime(args.start, "%Y-%m-%d")
