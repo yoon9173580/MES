@@ -1472,15 +1472,32 @@ const capturedLogs = [];
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 
+function safeStringify(val) {
+  if (val === null) return 'null';
+  if (val === undefined) return 'undefined';
+  if (typeof val === 'object') {
+    try {
+      if (val instanceof Error) {
+        return val.message + (val.stack ? '\n' + val.stack : '');
+      }
+      // Avoid circular structures by safely getting JSON representation
+      return JSON.stringify(val);
+    } catch (e) {
+      return Object.prototype.toString.call(val) + ' (non-serializable)';
+    }
+  }
+  return String(val);
+}
+
 console.error = function(...args) {
-  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  const msg = args.map(safeStringify).join(' ');
   capturedLogs.push(`[ERROR] ${msg}`);
   originalConsoleError.apply(console, args);
   if (typeof updateDiagnosticUI === 'function') updateDiagnosticUI();
 };
 
 console.warn = function(...args) {
-  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  const msg = args.map(safeStringify).join(' ');
   capturedLogs.push(`[WARN] ${msg}`);
   originalConsoleWarn.apply(console, args);
   if (typeof updateDiagnosticUI === 'function') updateDiagnosticUI();
@@ -1512,6 +1529,13 @@ function updateDiagnosticUI() {
       // Scroll to bottom
       logEl.scrollTop = logEl.scrollHeight;
     }
+  }
+  
+  // Dynamically update GSI Loaded status in system info if the element exists
+  const gsiSpan = document.getElementById('diagGsiStatus');
+  if (gsiSpan) {
+    const isLoaded = typeof google !== 'undefined' && google.accounts;
+    gsiSpan.innerHTML = isLoaded ? '<span style="color: #3dd68c; font-weight: 700;">YES ✅</span>' : '<span style="color: var(--stop); font-weight: 700;">NO ❌</span>';
   }
 }
 
@@ -1572,7 +1596,7 @@ function showGoogleAuthModal(googleClientId = '729700534302-3eaf1oulfa91mt75ootm
             Domain: ${window.location.hostname}<br>
             HTTPS: ${window.location.protocol === 'https:' ? 'YES ✅' : 'NO ❌'}<br>
             Client ID: <span id="diagClientIdSpan">${window.__activeGoogleClientId}</span><br>
-            GSI Loaded: ${typeof google !== 'undefined' && google.accounts ? 'YES ✅' : 'NO ❌'}
+            GSI Loaded: <span id="diagGsiStatus">NO ❌</span>
           </div>
           
           <div style="font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; margin-bottom: 0.4rem; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center;">
