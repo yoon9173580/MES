@@ -10,16 +10,23 @@ from datetime import datetime, timedelta
 import pytz, requests
 
 NY = pytz.timezone("America/New_York")
-import pandas as pd
-import numpy as np
-
-import sys
 try:
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-except NameError:
-    sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
-    sys.path.insert(0, os.getcwd())
-from engines.score_engine import run_score_engine
+    import pandas as pd
+    import numpy as np
+
+    import sys
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    except NameError:
+        sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
+        sys.path.insert(0, os.getcwd())
+    from engines.score_engine import run_score_engine
+
+    INIT_ERROR = None
+except Exception as e:
+    import traceback
+    INIT_ERROR = traceback.format_exc()
+
 STARTING_BALANCE = 10000.0
 TRADING_START_DATE = "2026-05-25"   # Day 1 of MES futures paper trading
 
@@ -1066,7 +1073,16 @@ def _verify_google_token(id_token):
         print(f"[Google Token Error] {e}")
     return None
 
-class handler(BaseHTTPRequestHandler):
+if INIT_ERROR:
+    class handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(f"Initialization Error:\n{INIT_ERROR}".encode('utf-8'))
+        def do_POST(self):
+            self.do_GET()
+else:
+    class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         origin = self.headers.get("Origin", "")
         self.send_response(200)
