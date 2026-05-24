@@ -1,6 +1,4 @@
-yfinance
 pandas
+numpy
 pytz
 requests
-numpy
-pandas_market_calendars
