@@ -266,6 +266,26 @@ def run_full_thorough_backtest(start_date: datetime, end_date: datetime, initial
 
 
 if __name__ == "__main__":
-    start = datetime(2023, 5, 1)   # ~3 years
-    end = datetime(2026, 5, 23)
-    run_full_thorough_backtest(start, end, initial_balance=2000)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Thorough Alpaca Historical Backtest (Real Engine)")
+    parser.add_argument("--start", type=str, default="2024-05-01", help="Start date YYYY-MM-DD")
+    parser.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD")
+    parser.add_argument("--timeframe", type=str, default="5Min", choices=["1Min", "5Min", "15Min"], help="Bar timeframe")
+    parser.add_argument("--balance", type=float, default=2000.0, help="Initial balance")
+
+    args = parser.parse_args()
+
+    start_dt = datetime.strptime(args.start, "%Y-%m-%d")
+    end_dt = datetime.strptime(args.end, "%Y-%m-%d") if args.end else datetime.now()
+
+    tf_map = {
+        "1Min": TimeFrame(1, TimeFrameUnit.Minute),
+        "5Min": TimeFrame(5, TimeFrameUnit.Minute),
+        "15Min": TimeFrame(15, TimeFrameUnit.Minute),
+    }
+    tf = tf_map.get(args.timeframe, TimeFrame(5, TimeFrameUnit.Minute))
+
+    print(f"Running: {args.start} ~ {args.end or 'today'} | Timeframe: {args.timeframe}")
+
+    run_full_thorough_backtest(start_dt, end_dt, initial_balance=args.balance)
