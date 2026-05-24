@@ -6,13 +6,18 @@ Google SSO only + Session Cookie (Last Update: 2026-05-25)
 import math, json, os, time, traceback, random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler
-from datetime import datetime, timedelta
-import pytz, requests
+INIT_ERROR = None
+try:
+    import pytz, requests
+    from datetime import datetime, timedelta
+    NY = pytz.timezone("America/New_York")
+    import pandas as pd
+    import numpy as np
+    from engines.score_engine import run_score_engine
+except Exception as e:
+    import traceback
+    INIT_ERROR = traceback.format_exc()
 
-NY = pytz.timezone("America/New_York")
-import pandas as pd
-import numpy as np
-from engines.score_engine import run_score_engine
 
 
 STARTING_BALANCE = 10000.0
@@ -1076,6 +1081,14 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if INIT_ERROR:
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(f"INIT ERROR:\n{INIT_ERROR}".encode('utf-8'))
+            return
+
         path = self.path.split("?")[0]
 
         # Handle logout (clears the session cookie)
@@ -1169,6 +1182,14 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": "Internal Server Error"}).encode('utf-8'))
 
     def do_GET(self):
+        if INIT_ERROR:
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(f"INIT ERROR:\n{INIT_ERROR}".encode('utf-8'))
+            return
+
         # Resolve client IP & Check Rate limit
         ip = self.headers.get("x-forwarded-for", "127.0.0.1").split(',')[0].strip()
         if not check_rate_limit(ip, 15):
