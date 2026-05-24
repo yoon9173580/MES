@@ -1040,6 +1040,20 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:5173",
 }
 
+def is_origin_allowed(origin):
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    if origin.endswith(".vercel.app"):
+        return True
+    if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
+        return True
+    if origin == "http://localhost" or origin == "http://127.0.0.1":
+        return True
+    return False
+
+
 def _verify_google_token(id_token):
     """Verify Google Sign-In JWT via Google tokeninfo endpoint."""
     if not id_token:
@@ -1073,10 +1087,10 @@ class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         origin = self.headers.get("Origin", "")
         self.send_response(200)
-        if origin in ALLOWED_ORIGINS:
+        if is_origin_allowed(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
         else:
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, x-api-key, Cookie')
         self.send_header('Access-Control-Allow-Credentials', 'true')
@@ -1099,10 +1113,10 @@ class handler(BaseHTTPRequestHandler):
             origin = self.headers.get("Origin", "")
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
-            if origin in ALLOWED_ORIGINS:
+            if is_origin_allowed(origin):
                 self.send_header('Access-Control-Allow-Origin', origin)
             else:
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
             # Clear the cookie immediately
             self.send_header('Set-Cookie', 'access_token=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict')
             self.send_header('Access-Control-Allow-Credentials', 'true')
@@ -1150,10 +1164,10 @@ class handler(BaseHTTPRequestHandler):
             if authorized:
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
-                if origin in ALLOWED_ORIGINS:
+                if is_origin_allowed(origin):
                     self.send_header('Access-Control-Allow-Origin', origin)
                 else:
-                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
                 
                 # Issue secure httpOnly session cookie (no Max-Age = cleared when browser fully closed)
                 # + client-side 3-hour inactivity protection for "no activity" case.
@@ -1166,10 +1180,10 @@ class handler(BaseHTTPRequestHandler):
             else:
                 self.send_response(401)
                 self.send_header('Content-Type', 'application/json')
-                if origin in ALLOWED_ORIGINS:
+                if is_origin_allowed(origin):
                     self.send_header('Access-Control-Allow-Origin', origin)
                 else:
-                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
                 self.send_header('Access-Control-Allow-Credentials', 'true')
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": False, "error": "Unauthorized"}).encode('utf-8'))
@@ -1180,10 +1194,10 @@ class handler(BaseHTTPRequestHandler):
             print(f"[Error in POST /api/unlock] {err_msg}")
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
-            if origin in ALLOWED_ORIGINS:
+            if is_origin_allowed(origin):
                 self.send_header('Access-Control-Allow-Origin', origin)
             else:
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
             self.end_headers()
             self.wfile.write(json.dumps({"error": "Internal Server Error"}).encode('utf-8'))
 
@@ -1202,10 +1216,10 @@ class handler(BaseHTTPRequestHandler):
             origin = self.headers.get("Origin", "")
             self.send_response(429)
             self.send_header('Content-Type', 'application/json')
-            if origin in ALLOWED_ORIGINS:
+            if is_origin_allowed(origin):
                 self.send_header('Access-Control-Allow-Origin', origin)
             else:
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
             self.end_headers()
             self.wfile.write(json.dumps({"error": "Too Many Requests", "message": "Rate limit exceeded. Max 15 requests per minute."}).encode('utf-8'))
             return
@@ -1219,10 +1233,10 @@ class handler(BaseHTTPRequestHandler):
                 origin = self.headers.get("Origin", "")
                 self.send_response(401)
                 self.send_header('Content-Type', 'application/json')
-                if origin in ALLOWED_ORIGINS:
+                if is_origin_allowed(origin):
                     self.send_header('Access-Control-Allow-Origin', origin)
                 else:
-                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
                 self.send_header('Access-Control-Allow-Credentials', 'true')
                 self.end_headers()
                 
@@ -1685,10 +1699,10 @@ class handler(BaseHTTPRequestHandler):
             origin = self.headers.get("Origin", "")
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
-            if origin in ALLOWED_ORIGINS:
+            if is_origin_allowed(origin):
                 self.send_header('Access-Control-Allow-Origin', origin)
             else:
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
             self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.end_headers()
             self.wfile.write(json.dumps(final, cls=SafeEncoder).encode('utf-8'))
@@ -1700,10 +1714,10 @@ class handler(BaseHTTPRequestHandler):
             origin = self.headers.get("Origin", "")
             self.send_response(500)
             self.send_header('Content-type', 'application/json')
-            if origin in ALLOWED_ORIGINS:
+            if is_origin_allowed(origin):
                 self.send_header('Access-Control-Allow-Origin', origin)
             else:
-                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Origin', 'https://hannaealgo.vercel.app')
             self.end_headers()
             
             # Hide detailed traceback in production/Vercel

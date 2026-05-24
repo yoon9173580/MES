@@ -1468,7 +1468,7 @@ document.getElementById('thTabs').addEventListener('click', e => {
 });
 
 // Google Auth modal (replaces legacy password unlock key)
-function showGoogleAuthModal(googleClientId || '729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com') {
+function showGoogleAuthModal(googleClientId = '729700534302-3eaf1oulfa91mt75ootm5m2lohvibk5p.apps.googleusercontent.com') {
   if (document.getElementById('googleAuthModal')) {
     const errEl = document.getElementById('googleAuthErr');
     if (errEl) {
