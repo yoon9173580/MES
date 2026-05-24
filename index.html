@@ -1547,11 +1547,16 @@ function startInactivityProtection() {
 
 async function loadData() {
   const t0 = performance.now();
+  const hasLocalSession = !!sessionStorage.getItem('hannae_auth_ok');
+
   try {
     // Cookie-based auth only (set by Google SSO /api/unlock). No more legacy key.
     let r = await fetch('/api/data', { cache: 'no-store', credentials: 'include' });
     
-    if (r.status === 401) {
+    // Force re-auth if:
+    // 1. Server says unauthorized (no cookie or invalid)
+    // 2. OR this tab has no local auth flag (new page open / new tab)
+    if (r.status === 401 || !hasLocalSession) {
       const respData = await r.json().catch(() => ({}));
       showGoogleAuthModal(respData.google_client_id);
       return;
