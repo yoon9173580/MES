@@ -50,9 +50,9 @@ ES_COMMISSION_RT = 2.50    # Round-trip commission per contract ($1.25 x 2)
 ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side (same as MES)
 ES_DAY_MARGIN = 500.0      # Day-trading margin (AMP/NinjaTrader intraday)
 
-# -- Strategy Parameters (Pro Trader Optimized) --
-MIN_SCORE = 90              # Base score threshold
-RISK_PCT = 0.10             # 10% Kelly-informed risk per trade
+# -- Strategy Parameters (Pro Trader Optimized v4) --
+MIN_SCORE = 88              # Slightly relaxed for more trades (88 vs 90)
+RISK_PCT = 0.12             # 12% Kelly-informed risk per trade
 MARGIN_UTIL = 0.95          # 95% margin utilization allowed
 EXIT_TIME = dtime(15, 30)   # Exit at 15:30 (avoid last 30min noise)
 VIX_THRESHOLD = 20.0        # VIX < 20 = Trend Follow, >= 20 = Mean Reversion
@@ -63,6 +63,9 @@ SECTOR_THRESHOLD = 1.8       # Sector breakout veto
 LOCKOUT_STRIKES = 2          # Consecutive losses before lockout
 LOCKOUT_DAYS = 3             # Days to cool down
 ATR_SL_MULT = 1.5            # SL = 1.5x ATR(14) dynamic
+TRAILING_ACTIVATION = 1.0    # Activate trailing stop after 1.0x ATR profit
+TRAILING_STEP = 0.5          # Trail by 0.5x ATR behind highest profit
+BREAKEVEN_AT = 0.5           # Move SL to breakeven after 0.5x ATR profit
 
 # -- Pro Strategy Bonuses --
 NR7_SCORE_BOOST = 5          # Score boost on NR7 days (Crabel)
@@ -386,9 +389,12 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         if num_contracts * ES_DAY_MARGIN > balance:
             continue
 
-        # -- Minute-by-Minute Price Simulation --
+        # -- Minute-by-Minute Price Simulation with Trailing Stop --
         entry_price = spy_entry_price
         sl_target = entry_price - sl_points if trade_dir == "LONG" else entry_price + sl_points
+        breakeven_activated = False
+        trailing_activated = False
+        best_price = entry_price  # Track best favorable price
 
         exit_price = None
         exit_type = "EOD"
@@ -399,12 +405,54 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 continue
             if ts_bar.time() > EXIT_TIME:
                 break
-            if trade_dir == "LONG" and l_bar <= sl_target:
-                exit_price = sl_target; exit_type = "SL"
-                exit_time_str = ts_bar.strftime("%H:%M"); break
-            elif trade_dir == "SHORT" and h_bar >= sl_target:
-                exit_price = sl_target; exit_type = "SL"
-                exit_time_str = ts_bar.strftime("%H:%M"); break
+
+            # Track best price for trailing stop
+            if trade_dir == "LONG":
+                if h_bar > best_price:
+                    best_price = h_bar
+                current_profit_pts = best_price - entry_price
+
+                # Breakeven stop: move SL to entry after 0.5x ATR profit
+                if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
+                    sl_target = entry_price + ES_SLIPPAGE_PTS  # Breakeven + cover slippage
+                    breakeven_activated = True
+
+                # Trailing stop: activate after 1.0x ATR profit, trail 0.5x ATR behind peak
+                if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
+                    trailing_sl = best_price - TRAILING_STEP * atr_val
+                    if trailing_sl > sl_target:
+                        sl_target = trailing_sl
+                        trailing_activated = True
+
+                # Check SL hit
+                if l_bar <= sl_target:
+                    exit_price = sl_target
+                    exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
+                    exit_time_str = ts_bar.strftime("%H:%M")
+                    break
+            else:  # SHORT
+                if l_bar < best_price:
+                    best_price = l_bar
+                current_profit_pts = entry_price - best_price
+
+                # Breakeven stop
+                if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
+                    sl_target = entry_price - ES_SLIPPAGE_PTS
+                    breakeven_activated = True
+
+                # Trailing stop
+                if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
+                    trailing_sl = best_price + TRAILING_STEP * atr_val
+                    if trailing_sl < sl_target:
+                        sl_target = trailing_sl
+                        trailing_activated = True
+
+                # Check SL hit
+                if h_bar >= sl_target:
+                    exit_price = sl_target
+                    exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
+                    exit_time_str = ts_bar.strftime("%H:%M")
+                    break
 
         # Exit at EXIT_TIME fallback
         if exit_price is None:
@@ -484,13 +532,17 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     # Count pro strategy usage
     nr7_trades = sum(1 for t in trades if "NR7" in t.get("boost_reasons", ""))
     pb_trades = sum(1 for t in trades if "3DAY_PB" in t.get("boost_reasons", ""))
+    trail_exits = sum(1 for t in trades if t.get("exit_type") == "TRAIL")
+    be_exits = sum(1 for t in trades if t.get("exit_type") == "BE")
+    sl_exits = sum(1 for t in trades if t.get("exit_type") == "SL")
+    eod_exits = sum(1 for t in trades if t.get("exit_type") == "EOD")
 
     print("\n" + "=" * 80)
-    print("  S&P 500 FUTURES (ES) - PRO STRATEGY RESULTS")
+    print("  S&P 500 FUTURES (ES) - PRO STRATEGY v4 RESULTS")
     print("=" * 80)
     print(f"  Period:            {start_str} ~ {end_str}")
     print(f"  Product:           E-mini S&P 500 (ES) [$50/pt]")
-    print(f"  Strategy:          ATR SL={ATR_SL_MULT}x + 15:30 Exit | Risk={RISK_PCT*100:.0f}%")
+    print(f"  Strategy:          ATR SL={ATR_SL_MULT}x + Trail + BE | Risk={RISK_PCT*100:.0f}%")
     print(f"  Pro Filters:       NR7 + 3Day Pullback + Gap + Daily Bias")
     print(f"  Starting Balance:  ${start_balance:,.2f}")
     print(f"  Final Balance:     ${balance:,.2f}")
@@ -502,6 +554,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     print(f"  Avg Loss:          ${avg_l:+,.2f}")
     print(f"  Profit Factor:     {pf}")
     print(f"  Max Drawdown:      {max_dd:.1f}%")
+    print(f"  Exit Types:        EOD={eod_exits} | TRAIL={trail_exits} | BE={be_exits} | SL={sl_exits}")
     print(f"  NR7 Boosted:       {nr7_trades} trades")
     print(f"  3Day PB Boosted:   {pb_trades} trades")
     print(f"  Running Time:      {time.time()-t_start:.1f}s")
