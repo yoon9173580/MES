@@ -13,6 +13,9 @@ try:
     NY = pytz.timezone("America/New_York")
     import pandas as pd
     import numpy as np
+
+    import sys, os
+    sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
     from engines.score_engine import run_score_engine
 except Exception as e:
     import traceback
