@@ -1205,8 +1205,26 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        # We only handle /api/unlock
-        if self.path.split("?")[0] != "/api/unlock":
+        path = self.path.split("?")[0]
+
+        # Handle logout (clears the session cookie)
+        if path == "/api/logout":
+            origin = self.headers.get("Origin", "")
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            if origin in ALLOWED_ORIGINS:
+                self.send_header('Access-Control-Allow-Origin', origin)
+            else:
+                self.send_header('Access-Control-Allow-Origin', '*')
+            # Clear the cookie immediately
+            self.send_header('Set-Cookie', 'access_token=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict')
+            self.send_header('Access-Control-Allow-Credentials', 'true')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True, "message": "Logged out"}).encode('utf-8'))
+            return
+
+        # We only handle /api/unlock otherwise
+        if path != "/api/unlock":
             self.send_response(404)
             self.end_headers()
             return
@@ -1247,11 +1265,9 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     self.send_header('Access-Control-Allow-Origin', '*')
                 
-                # Issue secure httpOnly cookie access_token=valid
-                # Max-Age: 7 days (604800)
-                # Secure; SameSite=Strict; Path=/; HttpOnly
-                # For local development we can also support it. SameSite=Strict ensures no CSRF.
-                cookie_str = "access_token=valid; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Strict"
+                # Issue secure httpOnly session cookie (no Max-Age = cleared when browser fully closed)
+                # + client-side 3-hour inactivity protection for "no activity" case.
+                cookie_str = "access_token=valid; Path=/; HttpOnly; Secure; SameSite=Strict"
                 self.send_header('Set-Cookie', cookie_str)
                 self.send_header('Access-Control-Allow-Credentials', 'true')
                 self.end_headers()

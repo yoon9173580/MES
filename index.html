@@ -400,6 +400,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
     <div style="color:var(--muted);display:flex;gap:12px;align-items:center" class="mono">
       <span>SYNC: <span id="syncTime">--</span> | <span id="latency">--</span></span>
       <span id="dataSourceStatus" style="font-size:0.65rem;color:var(--cyan)">--</span>
+      <span onclick="logout()" style="cursor:pointer;color:var(--muted);margin-left:8px;" title="로그아웃 (창 닫거나 3시간 비활성 시 자동)">로그아웃</span>
     </div>
   </div>
 
@@ -1506,6 +1507,42 @@ async function handleCredentialResponse(response) {
   }
 }
 
+// ── Logout + 3-hour inactivity auto-logout ─────────────────────────────
+async function logout() {
+  try {
+    await fetch('/api/logout', {
+      method: 'POST',
+      credentials: 'include'
+    });
+  } catch (e) {
+    console.warn('Logout request failed', e);
+  }
+  // Re-probe → will receive 401 and show Google modal
+  loadData();
+}
+
+// Inactivity timer (3 hours)
+let inactivityTimer = null;
+const INACTIVITY_LIMIT_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+function resetInactivityTimer() {
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(() => {
+    console.log('[Auth] 3시간 이상 활동 없음 → 자동 로그아웃');
+    logout();
+  }, INACTIVITY_LIMIT_MS);
+}
+
+// Reset timer on any user activity
+['mousemove', 'keydown', 'click', 'touchstart', 'scroll'].forEach(type => {
+  document.addEventListener(type, resetInactivityTimer, { passive: true });
+});
+
+// Start timer after first successful data load
+function startInactivityProtection() {
+  resetInactivityTimer();
+}
+
 async function loadData() {
   const t0 = performance.now();
   try {
@@ -1527,6 +1564,12 @@ async function loadData() {
       const data = await r.json();
       data.latency_ms = Math.round((data.latency_ms||0) + (performance.now()-t0));
       render(data);
+
+      // Start 3h inactivity protection only on the very first successful load
+      if (!window.__inactivityStarted) {
+        window.__inactivityStarted = true;
+        startInactivityProtection();
+      }
     }
   } catch(e) { 
     console.error('Fetch error:', e); 
