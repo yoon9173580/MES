@@ -1626,16 +1626,16 @@ async function loadData() {
         startInactivityProtection();
       }
 
-      // API polling only during regular market hours to save costs
+      // Smart polling: active during regular + extended hours (pre/after)
       const marketStatus = data.market_status || 'regular';
 
       if (marketStatus === 'regular') {
-        // Only active polling during regular trading hours
-        startDataPolling(15000);
+        startDataPolling(15000);           // 15s during core hours
+      } else if (marketStatus === 'pre_market' || marketStatus === 'after_hours') {
+        startDataPolling(20000);           // 20s during 1h extended hours (slightly gentler)
       } else {
-        // pre_market, after_hours, closed → completely stop auto polling
+        // Fully closed (night, weekends, holidays) → minimal polling
         stopDataPolling();
-        // You can add a small UI message here if desired, e.g. "Extended hours polling disabled"
       }
 
       return; // important: do not fall through
@@ -1644,11 +1644,14 @@ async function loadData() {
     console.error('Fetch error:', e); 
   }
 
-  // Fallback polling only during regular hours
+  // Fallback: only continue polling if we are in active market window
   const lastMarketStatus = (typeof data !== 'undefined' && data.market_status) || 'regular';
   if (lastMarketStatus === 'regular') {
     startDataPolling(15000);
+  } else if (lastMarketStatus === 'pre_market' || lastMarketStatus === 'after_hours') {
+    startDataPolling(20000);
   }
+  // else: closed → do not auto-poll
 }
 
 // === Force re-auth on EVERY page load / refresh (F5, Ctrl+R, etc.) ===
