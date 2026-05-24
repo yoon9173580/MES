@@ -195,8 +195,14 @@ def run_score_engine(now_et: datetime,
         signal["label"] = f"MARKET {session_name}"
         signal["action"] = "Market not in session"
 
-    # ── DIRECTION BIAS ──────────────────────────────────────────
-    direction_bias = layers["technical"].get("direction_bias", "NEUTRAL")
+    # ── DIRECTION BIAS (Counter-Trend Inversion Applied) ──────────
+    raw_bias = layers["technical"].get("direction_bias", "NEUTRAL")
+    if raw_bias == "CALL":
+        direction_bias = "PUT"
+    elif raw_bias == "PUT":
+        direction_bias = "CALL"
+    else:
+        direction_bias = "NEUTRAL"
 
     # ── BUILD FINAL OUTPUT ──────────────────────────────────────
     return {

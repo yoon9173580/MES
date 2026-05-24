@@ -21,6 +21,12 @@ import pandas as pd
 import pytz
 import yfinance as yf
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except:
+        pass
+
 try:
     import pandas_market_calendars as mcal
     HAS_MCAL = True
