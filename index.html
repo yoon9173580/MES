@@ -1647,6 +1647,23 @@ sessionStorage.removeItem('hannae_auth_ok');
 // so that the subsequent loadData() will see no valid session.
 fetch('/api/logout', { method: 'POST', credentials: 'include', keepalive: true }).catch(() => {});
 
+// Handle browser back/forward navigation (bfcache)
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) {
+    // Page was restored from back/forward cache
+    sessionStorage.removeItem('hannae_auth_ok');
+    stopDataPolling();
+
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) logoutBtn.style.display = 'none';
+
+    fetch('/api/logout', { method: 'POST', credentials: 'include', keepalive: true }).catch(() => {});
+
+    // Force re-auth flow
+    loadData();
+  }
+});
+
 loadData();
 </script>
 </body>
