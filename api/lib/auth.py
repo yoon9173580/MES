@@ -24,6 +24,13 @@ ALLOWED_ORIGINS = {
 }
 
 
+# ── TEMPORARY: Audit bypass (env-gated) ───────────────────────────
+# Set AUTH_BYPASS=1 on Vercel to disable Google SSO gate.
+# Intended for short-lived auditing only — REMOVE THIS ENV VAR AFTER USE.
+def auth_bypass_enabled():
+    return os.getenv("AUTH_BYPASS", "0") == "1"
+
+
 def is_origin_allowed(origin):
     if not origin:
         return False

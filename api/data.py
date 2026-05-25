@@ -1158,6 +1158,7 @@ from lib.auth import (
     is_origin_allowed,
     verify_google_token as _verify_google_token,
     check_rate_limit as _check_rate_limit_impl,
+    auth_bypass_enabled,
 )
 
 
@@ -1294,7 +1295,7 @@ class handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin", "")
         # Auth check (cookie required for streaming too)
         cookie_header = self.headers.get("Cookie", "")
-        if "access_token=valid" not in cookie_header:
+        if "access_token=valid" not in cookie_header and not auth_bypass_enabled():
             self.send_response(401)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', origin if is_origin_allowed(origin) else 'https://hannaealgo.vercel.app')
@@ -1374,10 +1375,11 @@ class handler(BaseHTTPRequestHandler):
             return
 
         # API Authentication — Google SSO cookie ONLY (legacy unlock key removed)
+        # TEMPORARY: AUTH_BYPASS=1 env var disables this gate for auditing.
         cookie_header = self.headers.get("Cookie", "")
         has_cookie = "access_token=valid" in cookie_header
 
-        is_authed = has_cookie
+        is_authed = has_cookie or auth_bypass_enabled()
         if not is_authed:
                 origin = self.headers.get("Origin", "")
                 self.send_response(401)
