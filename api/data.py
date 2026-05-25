@@ -75,26 +75,33 @@ BACKTEST_SUMMARY = {
         "note": "Real Databento data + live params. $10k → $14,293 in 3yr. 60% WR, 2.58 PF, 1.72 R:R. MDD 3.6% means worst drawdown was a $360 loss on $10k. Conservative but compounds: $10k → ~$14k in 3yr."
     },
     "bear_market_2022": {
-        # Synthetic stress test — extrapolated from 2022 SPY daily data
-        # using the same algo (VIX-aware, regime-RR, score 90-100, no SHORT
-        # without 93+). Real 1-min CSV for 2022 isn't yet ingested, so
-        # these numbers come from a daily-bar simulation with VIX≥25
-        # filter and counter-trend mode active most of the year.
-        "model": "MES Bear Market Stress Test (2022, daily-bar projection)",
+        # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
+        # full year (350,548 bars). Replaces the prior daily-bar projection.
+        # KEY FINDING: strategy went near-dormant in the 2022 bear market —
+        # only 2 entries cleared all filters (VIX dead-zone, macro gate,
+        # regime check, score >= 88). This is GOOD behavior for capital
+        # preservation — strategy stayed out rather than chasing volatile
+        # mean-reversion in a structural decline. But also shows the
+        # strategy is *too* conservative for high-VIX regimes; consider
+        # a separate counter-trend mode if you want exposure in bear markets.
+        "model": "MES Bear Market Backtest (2022 real CME data)",
         "period": "2022-01-03 ~ 2022-12-30",
         "period_days": 252,
-        "strategy": "VIX-25 filter + counter-trend mode for high VIX",
-        "total_trades": 18,           # most days filtered out by VIX>25
-        "wins": 11,
-        "losses": 7,
-        "win_rate": 61.1,
-        "profit_factor": 1.74,
-        "max_drawdown_pct": 8.2,
-        "annual_return_pct": 11.4,
-        "total_pnl_pct": 11.4,
+        "strategy": "ATR SL=1.5x + Trail + BE | Risk=1.5% | Same filters as live (no special bear mode)",
+        "total_trades": 2,
+        "wins": 1,
+        "losses": 1,
+        "win_rate": 50.0,
+        "profit_factor": 1.25,
+        "avg_win_mes": 164.50,
+        "avg_loss_mes": -132.00,
+        "max_drawdown_pct": 1.3,
+        "annual_return_pct": 0.3,
+        "total_pnl_pct": 0.3,
         "vix_avg": 25.8,
-        "note": "PROJECTION — daily-bar approximation. 1-min CSV backtest pending data ingestion. VIX>25 filter cut trade count by ~70% vs 2023-2026 sample.",
-        "status": "PROJECTION",
+        "note": "ACTUAL — Databento real 1-min data. Strategy filters blocked entry on 306/308 trading days (VIX dead-zone + macro gates). Result: capital preservation (+0.3%) but no alpha capture during bear market. Verdict: defensive design works as intended.",
+        "status": "ACTUAL",
+        "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex 2022)",
     }
 }
 

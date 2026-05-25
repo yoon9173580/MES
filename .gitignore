@@ -41,3 +41,5 @@ alpace-*.json
 # Vercel
 .vercel/
 walk_forward_results.json
+MES_2022_1min_data.csv
+backtest_2022_bear.json
