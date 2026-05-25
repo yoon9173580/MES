@@ -923,7 +923,7 @@ function render(py) {
       </div>
       <div class="strike-metric">
         <span class="strike-metric-label">🎯 Score</span>
-        <span class="strike-metric-value mono">${py.total_score||0}/${py.max_score||110}</span>
+        <span class="strike-metric-value mono">${py.total_score||0}/100 <span style="font-size:0.55rem;color:var(--muted);font-weight:400">(raw ${py.raw_score||0}/${py.max_score||120})</span></span>
       </div>
       <div class="strike-metric">
         <span class="strike-metric-label">📈 VIX Regime</span>
