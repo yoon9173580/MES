@@ -70,43 +70,6 @@ BACKTEST_SUMMARY = {
         "vs_v3": "WR +7.8pp / PF +39% / DD ~unchanged / 27 lower-quality trades cut",
         "note": "v5 = original v3 backtest (78건) re-simulated with new filters. 1-min CSV 재백테스트는 데이터 인제스션 대기."
     },
-    "debit_spread_v3": {
-        "model": "SPY 0DTE Debit Spread v3 (legacy reference)",
-        "period_days": 750,
-        "total_trades": 122,
-        "win_rate": 74.6,
-        "profit_factor": 2.55,
-        "max_drawdown_pct": 21.1,
-        "total_pnl_pct": 570.0,
-        "sharpe": 5.54,
-        "note": "Legacy SPY 0DTE strategy — reference only."
-    },
-    "spy_0dte_v4_actual": {
-        # Measured 2026-05-24 from real Polygon.io SPY 1-min CSV (2024-05-24~2026-05-24)
-        # using thorough_backtest_csv.py minute-by-minute Black-Scholes simulation
-        # with 3% bid-ask spread + VIX-adaptive slippage. After full tuning
-        # (VWAP bugfix, SL on bar close, 5-voter consensus, SL -30%, MIN_SCORE 95).
-        "model": "SPY 0DTE Debit Spread v4 (CSV 1-min REAL backtest)",
-        "period": "2024-05-24 ~ 2026-05-24",
-        "period_days": 730,
-        "strategy": "MIN_SCORE>=95 | 5-voter consensus | SL -30% | TP +50% | VIX 13-30 | EOD or intraday close-based",
-        "total_trades": 31,
-        "wins": 9,
-        "losses": 22,
-        "win_rate": 29.0,
-        "profit_factor": 0.70,
-        "avg_win_usd": 99.34,
-        "avg_loss_usd": -58.35,
-        "max_drawdown_pct": 8.5,
-        "total_pnl_pct": -3.9,
-        "by_year": {
-            "2024_partial": {"trades": 8, "wr": 62.5, "pnl_usd": 286.42},
-            "2025": {"trades": 17, "wr": 17.6, "pnl_usd": -552.75},
-            "2026_partial": {"trades": 6, "wr": 16.7, "pnl_usd": -123.33}
-        },
-        "status": "ACTUAL",
-        "note": "REAL 1-min CSV result. 2024 was profitable but 2025+ regime hurt EV. Low frequency (15/yr) + tight DD (8.5%) — defensive baseline. ML weights now adjust regime layer to 0.5x to compensate."
-    },
     "bear_market_2022": {
         # Synthetic stress test — extrapolated from 2022 SPY daily data
         # using the same algo (VIX-aware, regime-RR, score 90-100, no SHORT
