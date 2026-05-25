@@ -1430,6 +1430,42 @@ function renderBacktestSummary(py) {
       </div>
     </div>
 
+    <!-- SPY 0DTE v4 — REAL 1-min CSV Backtest (Actual Measured) -->
+    ${bs.spy_0dte_v4_actual ? `
+    <div style="margin-top:10px;background:#0a1a2a;border:1px solid #1e4d8e;border-radius:10px;padding:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:10px;color:#60a5fa;font-weight:700;letter-spacing:.1em;text-transform:uppercase">
+          🧪 SPY 0DTE v4 — Real 1-min CSV (Measured)
+        </div>
+        <span style="font-size:9px;color:#3dd68c;background:#0c2b1f;padding:2px 8px;border-radius:10px">${bs.spy_0dte_v4_actual.status || 'ACTUAL'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;font-size:11px">
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">WR</div>
+          <div style="color:${bs.spy_0dte_v4_actual.win_rate>=50?'#3dd68c':'#ff7070'};font-weight:700">${bs.spy_0dte_v4_actual.win_rate}%</div>
+        </div>
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">PF</div>
+          <div style="color:${bs.spy_0dte_v4_actual.profit_factor>=1?'#3dd68c':'#ff7070'};font-weight:700">${bs.spy_0dte_v4_actual.profit_factor}</div>
+        </div>
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">DD</div>
+          <div style="color:${bs.spy_0dte_v4_actual.max_drawdown_pct<15?'#3dd68c':'#f0a23a'};font-weight:700">${bs.spy_0dte_v4_actual.max_drawdown_pct}%</div>
+        </div>
+        <div style="background:rgba(0,0,0,.3);border-radius:6px;padding:6px;text-align:center">
+          <div style="color:#556;font-size:8px">P&L</div>
+          <div style="color:${bs.spy_0dte_v4_actual.total_pnl_pct>=0?'#3dd68c':'#ff7070'};font-weight:700">${bs.spy_0dte_v4_actual.total_pnl_pct>=0?'+':''}${bs.spy_0dte_v4_actual.total_pnl_pct}%</div>
+        </div>
+      </div>
+      <div style="margin-top:6px;font-size:9px;color:#779">
+        ${bs.spy_0dte_v4_actual.total_trades}건 (연 ~15회, ${bs.spy_0dte_v4_actual.period}) · Avg Win $${bs.spy_0dte_v4_actual.avg_win_usd} / Avg Loss $${Math.abs(bs.spy_0dte_v4_actual.avg_loss_usd)}
+      </div>
+      <div style="margin-top:4px;font-size:9px;color:#667;font-style:italic">
+        ${bs.spy_0dte_v4_actual.note}
+      </div>
+    </div>
+    ` : ''}
+
     <!-- 2022 Bear Market Stress Test -->
     ${bs.bear_market_2022 ? `
     <div style="margin-top:10px;background:#1a0f1f;border:1px solid #4a1f3f;border-radius:10px;padding:10px">
