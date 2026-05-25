@@ -487,6 +487,9 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
     </div>
   </div>
 
+  <!-- Holiday / Weekend Banner (rendered when market is closed for a known reason) -->
+  <div id="holidayBanner" style="display:none;border-radius:10px;padding:10px 16px;margin-bottom:1rem;font-size:0.85rem;font-weight:600;text-align:center;background:linear-gradient(135deg,#1a1a2e,#2a1f3e);border:1px solid rgba(167,139,250,0.25);color:var(--purple)"></div>
+
   <!-- Briefing -->
   <div class="briefing-bar" id="briefing">Connecting to signal engine...</div>
   <div id="macroBanner" style="display:none;border-radius:10px;padding:8px 14px;margin-bottom:1rem;font-size:0.78rem;font-weight:600;text-align:center"></div>
@@ -812,9 +815,37 @@ function tradeRowPnl(h, isOpen) {
   return { value: pnl, label: `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}`, isWin: pnl > 0 };
 }
 
+function renderHolidayBanner(py) {
+  // Show a top-of-page banner when the market is closed for a known reason.
+  // Prevents user confusion when score=0 and all values show "--" on holidays.
+  const el = document.getElementById('holidayBanner');
+  if (!el) return;
+  const h = py.holiday_info;
+  if (!h || !h.is_closed_day || py.market_status === 'regular') {
+    el.style.display = 'none';
+    return;
+  }
+  let title, body;
+  if (h.is_holiday) {
+    title = `🎉 ${h.name} — US Market Closed`;
+    body = 'NYSE/CME 휴장. 모든 가격·점수 데이터는 마지막 거래일 기준이며 라이브 시그널은 비활성 상태입니다.';
+  } else if (h.is_weekend) {
+    title = `📅 Weekend — US Market Closed`;
+    body = '주말 휴장. 다음 정규장에 다시 활성화됩니다.';
+  } else {
+    title = `🌙 After Hours — US Market Closed`;
+    body = '정규장 외 시간. 라이브 시그널은 정규장(9:30~16:00 ET)에 작동합니다.';
+  }
+  el.style.display = 'block';
+  el.innerHTML = `<div style="font-size:1rem;margin-bottom:4px">${title}</div><div style="font-size:0.7rem;color:var(--muted);font-weight:400">${body}</div>`;
+}
+
 function render(py) {
   document.getElementById('syncTime').textContent = py.last_updated + ' ET';
   document.getElementById('latency').textContent = py.latency_ms + 'ms';
+
+  // Holiday / weekend banner (above everything else)
+  renderHolidayBanner(py);
   
   // Data Source Status (FlashAlpha, Alpaca, etc.)
   if (py.data_source) {

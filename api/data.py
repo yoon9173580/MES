@@ -154,12 +154,73 @@ class SafeEncoder(json.JSONEncoder):
 # ── Alpaca Data Fetchers ────────────────────────────────────────────
 
 def _alpaca_snapshots(symbols):
-    """Fetch latest snapshots for multiple stock symbols."""
+    """Fetch latest snapshots for multiple stock symbols.
+
+    Falls back to Polygon grouped daily aggs (1 request, free-tier safe)
+    if Alpaca is unreachable or returns an HTTP error. This protects the
+    indices/mag7 grid from going totally blank when one upstream is down.
+    """
     url = f"{ALPACA_DATA_URL}/v2/stocks/snapshots"
-    r = requests.get(url, headers=ALPACA_HEADERS,
-                     params={"symbols": ",".join(symbols), "feed": "iex"}, timeout=5)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get(url, headers=ALPACA_HEADERS,
+                         params={"symbols": ",".join(symbols), "feed": "iex"}, timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[Alpaca Snapshots] Failed, trying Polygon fallback: {e}")
+        fb = _polygon_snapshots_fallback(symbols)
+        if fb:
+            return fb
+        raise  # both upstreams failed — let caller handle
+
+
+def _polygon_snapshots_fallback(symbols):
+    """Polygon grouped daily aggs fallback when Alpaca is down.
+
+    Uses /v2/aggs/grouped/locale/us/market/stocks/{date} — a single
+    request that returns OHLC for all US stocks. Free-tier-friendly
+    (1 req vs 12 individual snapshot calls).
+
+    Returns an Alpaca-shaped dict so callers don't need to branch on
+    source. Prev-day close becomes both `latestTrade.p` (current proxy)
+    AND `prevDailyBar.c`, so pct change shows 0% — better than missing
+    data, and is clearly labeled stale by the caller's flashalpha logic.
+    """
+    api_key = os.getenv("POLYGON_API_KEY", "")
+    if not api_key:
+        return None
+    # Use yesterday's date — today won't have grouped data until after close
+    now = datetime.now(NY)
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{yesterday}"
+    try:
+        r = requests.get(url, params={"apiKey": api_key, "adjusted": "true"}, timeout=8)
+        if r.status_code != 200:
+            print(f"[Polygon Fallback] HTTP {r.status_code}: {r.text[:120]}")
+            return None
+        data = r.json().get("results") or []
+        wanted = set(symbols)
+        out = {"snapshots": {}}
+        for row in data:
+            sym = row.get("T")
+            if sym not in wanted:
+                continue
+            close = row.get("c")
+            open_ = row.get("o", close)
+            if close is None:
+                continue
+            out["snapshots"][sym] = {
+                "latestTrade": {"p": close},
+                "prevDailyBar": {"c": open_},  # use day-open as prev for some pct signal
+                "dailyBar": {"o": open_, "h": row.get("h", close), "l": row.get("l", close), "c": close, "v": row.get("v", 0)},
+                "_source": "polygon_fallback",
+            }
+        if out["snapshots"]:
+            print(f"[Polygon Fallback] OK — {len(out['snapshots'])}/{len(wanted)} symbols")
+            return out
+    except Exception as e:
+        print(f"[Polygon Fallback Error] {e}")
+    return None
 
 
 def _alpaca_bars(symbol, timeframe="5Min"):
@@ -425,6 +486,53 @@ def _flashalpha_spy_summary():
     return None
 
 
+# ── NYSE Holiday Calendar (single source of truth) ──────────────
+# Maps date → human-readable holiday name. Used by get_market_status
+# AND surfaced to frontend so users see "Memorial Day" instead of just
+# "market closed" with no explanation.
+NYSE_HOLIDAYS = {
+    # 2026
+    datetime(2026, 1, 1).date():   "New Year's Day",
+    datetime(2026, 1, 19).date():  "MLK Day",
+    datetime(2026, 2, 16).date():  "Presidents' Day",
+    datetime(2026, 4, 3).date():   "Good Friday",
+    datetime(2026, 5, 25).date():  "Memorial Day",
+    datetime(2026, 6, 19).date():  "Juneteenth",
+    datetime(2026, 7, 3).date():   "Independence Day (observed)",
+    datetime(2026, 9, 7).date():   "Labor Day",
+    datetime(2026, 11, 26).date(): "Thanksgiving",
+    datetime(2026, 12, 25).date(): "Christmas",
+    # 2027 (forward-loaded so dashboard doesn't go silent at year boundary)
+    datetime(2027, 1, 1).date():   "New Year's Day",
+    datetime(2027, 1, 18).date():  "MLK Day",
+    datetime(2027, 2, 15).date():  "Presidents' Day",
+    datetime(2027, 3, 26).date():  "Good Friday",
+    datetime(2027, 5, 31).date():  "Memorial Day",
+    datetime(2027, 6, 18).date():  "Juneteenth (observed)",
+    datetime(2027, 7, 5).date():   "Independence Day (observed)",
+    datetime(2027, 9, 6).date():   "Labor Day",
+    datetime(2027, 11, 25).date(): "Thanksgiving",
+    datetime(2027, 12, 24).date(): "Christmas (observed)",
+}
+
+
+def get_holiday_info(dt):
+    """
+    Returns {is_holiday: bool, name: str|None, is_weekend: bool} for the given date.
+
+    Used by the API to surface a banner on the dashboard so users don't
+    wonder "why are all values zero" on closed days.
+    """
+    is_weekend = dt.weekday() >= 5
+    holiday_name = NYSE_HOLIDAYS.get(dt.date())
+    return {
+        "is_holiday": holiday_name is not None,
+        "name": holiday_name,
+        "is_weekend": is_weekend,
+        "is_closed_day": is_weekend or holiday_name is not None,
+    }
+
+
 def get_market_status(dt):
     """
     Returns market status for smart API usage:
@@ -441,20 +549,8 @@ def get_market_status(dt):
     if dt.weekday() >= 5:
         return 'closed'
 
-    # 2. NYSE holidays 2026
-    nyse_holidays_2026 = {
-        datetime(2026, 1, 1).date(),
-        datetime(2026, 1, 19).date(),
-        datetime(2026, 2, 16).date(),
-        datetime(2026, 4, 3).date(),
-        datetime(2026, 5, 25).date(),
-        datetime(2026, 6, 19).date(),
-        datetime(2026, 7, 3).date(),
-        datetime(2026, 9, 7).date(),
-        datetime(2026, 11, 26).date(),
-        datetime(2026, 12, 25).date(),
-    }
-    if dt.date() in nyse_holidays_2026:
+    # 2. NYSE holidays (single source — NYSE_HOLIDAYS map)
+    if dt.date() in NYSE_HOLIDAYS:
         return 'closed'
 
     t_min = dt.hour * 60 + dt.minute
@@ -1936,24 +2032,11 @@ class handler(BaseHTTPRequestHandler):
             start_dt = datetime.strptime(TRADING_START_DATE, "%Y-%m-%d").date()
             today_dt = now.date()
             calendar_day = max(1, (today_dt - start_dt).days + 1)
-            # NYSE holidays 2026
-            nyse_holidays_2026 = {
-                datetime(2026,1,1).date(),    # New Year's Day
-                datetime(2026,1,19).date(),   # MLK Day
-                datetime(2026,2,16).date(),   # Presidents' Day
-                datetime(2026,4,3).date(),    # Good Friday
-                datetime(2026,5,25).date(),   # Memorial Day
-                datetime(2026,6,19).date(),   # Juneteenth
-                datetime(2026,7,3).date(),    # Independence Day (observed)
-                datetime(2026,9,7).date(),    # Labor Day
-                datetime(2026,11,26).date(),  # Thanksgiving
-                datetime(2026,12,25).date(),  # Christmas
-            }
-            # Trading day = weekdays (Mon-Fri) minus NYSE holidays
+            # Trading day = weekdays (Mon-Fri) minus NYSE_HOLIDAYS
             trading_day_count = 0
             d = start_dt
             while d <= today_dt:
-                if d.weekday() < 5 and d not in nyse_holidays_2026:
+                if d.weekday() < 5 and d not in NYSE_HOLIDAYS:
                     trading_day_count += 1
                 d += timedelta(days=1)
             trading_day = max(1, trading_day_count)
@@ -2048,6 +2131,7 @@ class handler(BaseHTTPRequestHandler):
                 "flashalpha": flashalpha_spy,
                 "session": "REGULAR" if is_regular else "CLOSED",
                 "market_status": status,                    # NEW: regular / pre_market / after_hours / closed
+                "holiday_info": get_holiday_info(now),       # NEW: {is_holiday, name, is_weekend, is_closed_day}
                 "trading_day": trading_day,
                 "calendar_day": calendar_day,
                 "trading_start_date": TRADING_START_DATE,
