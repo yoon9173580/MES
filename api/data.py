@@ -2112,6 +2112,29 @@ class handler(BaseHTTPRequestHandler):
                 "limit_pct": 5.0,
             }
 
+            # ── Data Health snapshot ─────────────────────────────────
+            # Surfaces which upstream sources are actually delivering vs
+            # which are degraded/down. Lets the frontend show a status
+            # indicator instead of users wondering why a card is blank.
+            data_health = {
+                "alpaca_snapshots": "OK" if bundle.get("snaps") else "DOWN",
+                "alpaca_bars": "OK" if (bundle.get("spy_h") is not None and not bundle["spy_h"].empty) else "DOWN",
+                "vix": _VIX_CACHE.get("source", "UNKNOWN"),
+                "vix_fetch_ok": bool(_VIX_CACHE.get("fetch_ok", False)),
+                "flashalpha": "OK" if flashalpha_spy and not flashalpha_spy.get("is_stale") else ("STALE" if flashalpha_spy else "DOWN"),
+                "polygon_fallback_active": any(
+                    (s or {}).get("_source") == "polygon_fallback"
+                    for s in (bundle.get("snaps", {}).get("snapshots") or {}).values()
+                ),
+            }
+
+            # ── ML Stats snapshot (sample count + confidence) ────────
+            try:
+                from engines.ml_weights import get_ml_stats
+                ml_stats = get_ml_stats()
+            except Exception as e:
+                ml_stats = {"error": str(e)[:120], "confidence": "ERROR"}
+
             # Adaptive next-poll hint — frontend uses this instead of a
             # hardcoded 10s interval. Vercel Python serverless can't hold a
             # WebSocket, so we lean on shorter polls during active windows
@@ -2169,6 +2192,8 @@ class handler(BaseHTTPRequestHandler):
                 },
                 "daily_halt": daily_dd_pct >= DAILY_LOSS_LIMIT * 100,
                 "daily_drawdown_pct": round(daily_dd_pct, 2),
+                "data_health": data_health,
+                "ml_stats": ml_stats,
             }
 
             # ETag from signal-relevant subset (so unchanged signals don't

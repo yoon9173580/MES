@@ -13,7 +13,15 @@ class AdaptiveWeightEngine:
             "regime": 1.0,
             "flow": 1.0,
             "correlation": 1.0,
-            "last_updated": 0
+            "last_updated": 0,
+            # ── Sample-tracking (so weights aren't trusted before warm-up) ──
+            "sample_count": 0,
+            "wins": 0,
+            "losses": 0,
+            # ── Per-layer update counts (which layer is getting most signal) ──
+            "updates_per_layer": {
+                "technical": 0, "regime": 0, "flow": 0, "correlation": 0,
+            },
         }
         self.load_weights()
 
@@ -83,8 +91,15 @@ class AdaptiveWeightEngine:
 
         if pnl > 0:
             self.weights[dominant] = min(max_w, self.weights[dominant] + lr * scale)
+            self.weights["wins"] = self.weights.get("wins", 0) + 1
         elif pnl < 0:
             self.weights[dominant] = max(min_w, self.weights[dominant] - lr * scale)
+            self.weights["losses"] = self.weights.get("losses", 0) + 1
+
+        # Track sample count + per-layer update count for transparency
+        self.weights["sample_count"] = self.weights.get("sample_count", 0) + 1
+        per_layer = self.weights.setdefault("updates_per_layer", {})
+        per_layer[dominant] = per_layer.get(dominant, 0) + 1
 
         # Decay all weights toward 1.0 so stale advantages dissipate.
         for k in ("technical", "regime", "flow", "correlation"):
@@ -93,11 +108,44 @@ class AdaptiveWeightEngine:
 
         self.save_weights()
 
+    def get_stats(self):
+        """Public snapshot of weights + sample-size confidence.
+
+        Used by the API to surface ML state to the frontend so users can
+        see *whether* the weights are trustworthy (warm-up phase needs
+        ~30+ trades before adjustments mean much).
+        """
+        n = self.weights.get("sample_count", 0)
+        wins = self.weights.get("wins", 0)
+        losses = self.weights.get("losses", 0)
+        if n >= 30:
+            confidence = "TRUSTED"
+        elif n >= 10:
+            confidence = "WARMING_UP"
+        else:
+            confidence = "COLD_START"
+        wr = round(wins / n * 100, 1) if n else None
+        return {
+            "weights": {k: round(self.weights.get(k, 1.0), 3)
+                        for k in ("technical", "regime", "flow", "correlation")},
+            "sample_count": n,
+            "wins": wins,
+            "losses": losses,
+            "observed_wr_pct": wr,
+            "updates_per_layer": dict(self.weights.get("updates_per_layer") or {}),
+            "confidence": confidence,
+            "last_updated": self.weights.get("last_updated", 0),
+        }
+
 # Singleton instance
 _ml_engine = AdaptiveWeightEngine()
 
 def get_ml_multipliers():
     return _ml_engine.get_multipliers()
+
+def get_ml_stats():
+    """Snapshot of weights + sample-size confidence for the API response."""
+    return _ml_engine.get_stats()
 
 def feedback_trade_result(trade_result):
     _ml_engine.update_weights(trade_result)
