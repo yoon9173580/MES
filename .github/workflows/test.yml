@@ -1,0 +1,48 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytz requests pandas numpy
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+
+      - name: Test import — api/data.py
+        run: |
+          cd api && python -c "import data; print('data.py imports OK')"
+
+      - name: Test import — all engines
+        run: |
+          cd api && python -c "
+          from engines.score_engine import determine_signal_grade
+          from engines.risk_manager import check_risk_rules, calculate_position_size
+          from engines.regime import calculate_regime_score
+          from engines.correlation import calculate_correlation_score
+          from engines.time_window import calculate_time_score
+          from engines.technical import calculate_technical_score
+          print('All engines import OK')
+          "
