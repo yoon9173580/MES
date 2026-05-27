@@ -13,6 +13,7 @@ Vercel 서버리스에서 매 요청마다 외부 호출은 비싸므로 ttl=120
 import os
 import time
 import requests
+from typing import Optional
 
 _CACHE = {"at": 0.0, "data": None}
 CACHE_TTL_SEC = 120
@@ -21,7 +22,7 @@ POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
 TRADIER_API_KEY = os.getenv("TRADIER_API_KEY", "")
 
 
-def _polygon_options_chain(symbol: str = "SPY") -> dict | None:
+def _polygon_options_chain(symbol: str = "SPY") -> Optional[dict]:
     """Polygon.io 옵션 체인 — 유료 (Starter $29/mo부터). POLYGON_API_KEY 필요.
 
     /v3/snapshot/options/SPY 응답을 yahoo와 같은 모양으로 정규화.
@@ -55,7 +56,7 @@ def _polygon_options_chain(symbol: str = "SPY") -> dict | None:
         return None
 
 
-def _tradier_options_chain(symbol: str = "SPY") -> dict | None:
+def _tradier_options_chain(symbol: str = "SPY") -> Optional[dict]:
     """Tradier 옵션 체인 — 유료 ($10/mo). TRADIER_API_KEY 필요."""
     if not TRADIER_API_KEY:
         return None
@@ -96,7 +97,7 @@ def _tradier_options_chain(symbol: str = "SPY") -> dict | None:
         return None
 
 
-def _yahoo_options_chain(symbol: str = "SPY") -> dict | None:
+def _yahoo_options_chain(symbol: str = "SPY") -> Optional[dict]:
     """무료 Yahoo 옵션 체인 — 폴백. rate limited, 신뢰도 낮음."""
     try:
         url = f"https://query2.finance.yahoo.com/v7/finance/options/{symbol}"
@@ -112,7 +113,8 @@ def _yahoo_options_chain(symbol: str = "SPY") -> dict | None:
         return None
 
 
-def _fetch_chain(symbol: str = "SPY") -> tuple[dict | None, str]:
+def _fetch_chain(symbol: str = "SPY"):
+    # type: (str) -> tuple  # (chain_dict_or_None, source_str)
     """Try premium feeds first, fall back to Yahoo. Returns (chain, source)."""
     chain = _polygon_options_chain(symbol)
     if chain:

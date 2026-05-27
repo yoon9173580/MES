@@ -131,8 +131,36 @@ FUTURES_PROXIES = {
 FLASHALPHA_API_KEY = os.getenv("FLASHALPHA_API_KEY", "")
 FLASHALPHA_API_URL = "https://lab.flashalpha.com/v1"
 _VIX_CACHE = {"at": 0.0, "vix": 18.0, "vix3m": None}
-# Rolling VIX baseline (지수 이동 평균) — 스파이크 감지용
+# Rolling VIX baseline (지수 이동 평균) — 스파이크 감지용.
+# Persists across Vercel cold starts via local /tmp file (best-effort);
+# Upstash KV would be more reliable but adds a remote call per request.
+_VIX_BASELINE_FILE = os.path.join("/tmp" if os.getenv("VERCEL") else "data_cache",
+                                   "vix_baseline.json")
 _VIX_BASELINE = {"ema": None, "alpha": 0.05}
+
+
+def _load_vix_baseline():
+    """Hydrate _VIX_BASELINE from /tmp on cold start (Vercel-friendly)."""
+    try:
+        if os.path.exists(_VIX_BASELINE_FILE):
+            with open(_VIX_BASELINE_FILE, "r") as f:
+                d = json.load(f)
+                if isinstance(d.get("ema"), (int, float)):
+                    _VIX_BASELINE["ema"] = float(d["ema"])
+    except Exception:
+        pass
+
+
+def _save_vix_baseline():
+    try:
+        os.makedirs(os.path.dirname(_VIX_BASELINE_FILE), exist_ok=True)
+        with open(_VIX_BASELINE_FILE, "w") as f:
+            json.dump({"ema": _VIX_BASELINE["ema"]}, f)
+    except Exception:
+        pass
+
+
+_load_vix_baseline()
 VIX_CACHE_SEC = int(os.getenv("VIX_CACHE_SEC", "45"))
 YAHOO_UA = "Mozilla/5.0 (compatible; ESFutures/2.0)"
 
@@ -211,13 +239,14 @@ def _vix_fallback():
         pass
 
     _VIX_CACHE.update({"at": now, "vix": vix_p, "vix3m": vix3m_p})
-    # Update EWMA baseline for tail-risk detection
+    # Update EWMA baseline for tail-risk detection (persists across cold starts)
     if vix_p is not None:
         if _VIX_BASELINE["ema"] is None:
             _VIX_BASELINE["ema"] = vix_p
         else:
             a = _VIX_BASELINE["alpha"]
             _VIX_BASELINE["ema"] = a * vix_p + (1 - a) * _VIX_BASELINE["ema"]
+        _save_vix_baseline()
     return vix_p, vix3m_p
 
 
@@ -1882,6 +1911,10 @@ class handler(BaseHTTPRequestHandler):
             else:
                 next_poll_sec = 60
 
+            # Tail-risk snapshot — used in ETag basis AND response body, so
+            # compute once before either consumer (cheap; reads in-mem EWMA).
+            tail_risk = _tail_risk_status(vix_p)
+
             final = {
                 "last_updated": ts, "fetch_status": "SUCCESS", "latency_ms": latency,
                 "next_poll_sec": next_poll_sec,
@@ -1907,7 +1940,7 @@ class handler(BaseHTTPRequestHandler):
                 "backtest_summary": BACKTEST_SUMMARY,
                 "paper_trading_stats": paper_trading_stats,
                 "portfolio_heat": portfolio_heat,
-                "tail_risk": _tail_risk_status(vix_p),
+                "tail_risk": tail_risk,
                 "feature_flags": _feature_flags_snapshot(),
                 "mes_specs": {
                     "instrument": "MES",
@@ -1931,13 +1964,17 @@ class handler(BaseHTTPRequestHandler):
 
             # ETag from signal-relevant subset (so unchanged signals don't
             # ship a full payload — the client just polls and gets 304).
+            # Bucket by 5-minute window so identical signals across short
+            # spans keep returning 304 (was per-minute → every minute the
+            # ETag flipped and forced a 200, wasting bandwidth).
             etag_basis = {
                 "grade": signal.get("grade"),
                 "score": normalized,
                 "bias": direction_bias,
-                "minute": now.strftime("%H:%M"),
+                "bucket": f"{now.hour}:{now.minute // 5}",
                 "open_pos": today_str in (portfolio.get("positions") or {}),
                 "dd": daily_dd_pct,
+                "tail": tail_risk.get("status"),
             }
             import hashlib
             etag = '"' + hashlib.md5(json.dumps(etag_basis, sort_keys=True).encode()).hexdigest()[:16] + '"'

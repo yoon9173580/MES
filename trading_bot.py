@@ -88,13 +88,21 @@ def place_bracket_order(symbol, qty, side, take_profit, stop_loss):
 
 
 def _dominant_layer(score_result):
-    """Pick the layer that contributed the largest share of the total score."""
+    """Pick the layer that contributed the largest share of the total score.
+
+    Includes 'flow' (options_flow) when LIVE — previously the flow weight
+    in ml_weights was set up to be tuned but never received feedback
+    because the bot only voted between {regime, correlation, technical}.
+    """
     layers = score_result.get("layers", {})
     candidates = {
         "regime":      layers.get("regime", {}).get("score", 0) or 0,
         "correlation": layers.get("correlation", {}).get("score", 0) or 0,
         "technical":   layers.get("technical", {}).get("score", 0) or 0,
     }
+    of_layer = layers.get("options_flow", {})
+    if of_layer.get("status") == "LIVE":
+        candidates["flow"] = of_layer.get("score", 0) or 0
     if not any(candidates.values()):
         return "technical"
     return max(candidates, key=candidates.get)
@@ -199,10 +207,14 @@ def main_loop():
                 # Trust the grade computed by the score engine (GRADE_STRONG
                 # may be env-overridden) instead of hard-coding a score floor
                 # that could disagree with the dashboard's classification.
+                # SHORT trades require >=93 (matches api/data.py
+                # _entry_criteria_met) — backtest had only 7 SHORT in 78
+                # so the SHORT setup needs stronger conviction.
                 if (
                     is_regular
                     and signal.get("grade") == "STRONG"
                     and bias in ("LONG", "SHORT")
+                    and not (bias == "SHORT" and total_score < 93)
                 ):
                     logger.info("STRONG SIGNAL DETECTED — submitting bracket order")
                     side = "buy" if bias == "LONG" else "sell"

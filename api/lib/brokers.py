@@ -22,6 +22,7 @@ import time
 import requests
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Optional, Tuple
 
 
 class BrokerAdapter(ABC):
@@ -32,7 +33,7 @@ class BrokerAdapter(ABC):
     supports_equity: bool = False
 
     @abstractmethod
-    def get_account_equity(self) -> float | None:
+    def get_account_equity(self) -> Optional[float]:
         """현재 계좌 잔고 (USD)."""
 
     @abstractmethod
@@ -41,11 +42,11 @@ class BrokerAdapter(ABC):
 
     @abstractmethod
     def place_bracket_order(self, symbol: str, qty: int, side: str,
-                             take_profit: float, stop_loss: float) -> dict | None:
+                             take_profit: float, stop_loss: float) -> Optional[dict]:
         """SL+TP 동반 진입 주문."""
 
     @abstractmethod
-    def is_ready(self) -> tuple[bool, str]:
+    def is_ready(self) -> Tuple[bool, str]:
         """자격증명/연결 상태 확인. (ok, reason) 반환."""
 
 
