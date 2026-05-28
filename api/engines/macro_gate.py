@@ -22,7 +22,8 @@ _FOMC_LIVE_CACHE = {"at": 0.0, "dates": None}
 FOMC_LIVE_TTL_SEC = 3600   # 1시간
 
 
-def _fetch_live_fomc_dates() -> list | None:
+def _fetch_live_fomc_dates():
+    # type: () -> Optional[list]  (Optional[] kept out of annotation for 3.9 compat)
     """Fed 캘린더 페이지에서 FOMC 결정일을 추출 (베스트-에포트).
 
     실패하면 None 반환 → 하드코딩 FOMC_DATES 사용.

@@ -427,6 +427,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
     <div style="display:flex;align-items:center;gap:8px"><div class="pulse-dot"></div><span class="mono" style="font-weight:700">MES FUTURES SIGNAL ENGINE</span></div>
     <div style="color:var(--muted);display:flex;gap:12px;align-items:center" class="mono">
       <span>SYNC: <span id="syncTime">--</span> | <span id="latency">--</span></span>
+      <span data-live-vix style="font-size:0.65rem;color:var(--warn);font-weight:600"></span>
       <span id="dataSourceStatus" style="font-size:0.65rem;color:var(--cyan)">--</span>
       <span id="logoutBtn" onclick="logout()" style="cursor:pointer;color:var(--muted);margin-left:8px; display:none;" title="로그아웃 (창 닫거나 3시간 비활성 시 자동)">로그아웃</span>
     </div>
@@ -2140,11 +2141,52 @@ function stopDataPolling() {
     clearTimeout(pollingTimer);
     pollingTimer = null;
   }
+  // Tear down SSE stream if open
+  if (window.__sseStream) {
+    try { window.__sseStream.close(); } catch(_) {}
+    window.__sseStream = null;
+  }
 }
 
 function startDataPolling(intervalMs = 15000) {
   stopDataPolling();
   pollingTimer = setTimeout(loadData, intervalMs);
+}
+
+// ── Server-Sent Events stream for keep-alive ticks ──
+// Backend /api/stream emits a {ts, vix, frame} event every ~5s for 55s.
+// We don't render from these directly — they just nudge loadData() so the
+// dashboard ticks even when the polling timer's interval is long.
+function startSSEStream() {
+  if (window.__sseStream) return;  // already running
+  if (typeof EventSource === 'undefined') return;  // unsupported (very old browsers)
+  try {
+    const es = new EventSource('/api/stream', { withCredentials: true });
+    window.__sseStream = es;
+    let lastFrame = 0;
+    es.addEventListener('tick', (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        lastFrame = data.frame || 0;
+        // Live VIX badge update without a full reload
+        if (data.vix != null) {
+          const el = document.querySelector('[data-live-vix]');
+          if (el) el.textContent = `VIX ${Number(data.vix).toFixed(2)}`;
+        }
+      } catch(_) {}
+    });
+    es.onerror = () => {
+      // Vercel closes the stream at the 55s deadline. Reconnect on next idle.
+      try { es.close(); } catch(_) {}
+      window.__sseStream = null;
+      // Reopen after a short delay if we're still authenticated
+      if (sessionStorage.getItem('hannae_auth_ok')) {
+        setTimeout(startSSEStream, 2000);
+      }
+    };
+  } catch(_) {
+    window.__sseStream = null;
+  }
 }
 
 async function loadData() {
@@ -2212,6 +2254,13 @@ async function loadData() {
       if (!window.__inactivityStarted) {
         window.__inactivityStarted = true;
         startInactivityProtection();
+      }
+
+      // Open SSE stream once per authenticated session — gives sub-second
+      // VIX updates between polling cycles. Reconnects automatically on
+      // the 55s server deadline.
+      if (!window.__sseStream && (data.market_status === 'regular' || data.market_status === 'pre_market')) {
+        startSSEStream();
       }
 
       // Adaptive polling — use server-supplied next_poll_sec (already
