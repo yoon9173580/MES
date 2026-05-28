@@ -29,6 +29,14 @@
       }
     },
     {
+      "src": "/api/health",
+      "dest": "/api/data.py",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin"
+      }
+    },
+    {
       "src": "/api/unlock",
       "dest": "/api/data.py",
       "headers": {

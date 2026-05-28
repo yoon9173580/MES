@@ -18,6 +18,7 @@ try:
     sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
     from engines.score_engine import run_score_engine
     from lib.feature_flags import all_flags as _feature_flags_snapshot
+    from lib.health import snapshot as _health_snapshot, log_error, log_warn
 except Exception as e:
     import traceback
     INIT_ERROR = traceback.format_exc()
@@ -132,15 +133,62 @@ FLASHALPHA_API_KEY = os.getenv("FLASHALPHA_API_KEY", "")
 FLASHALPHA_API_URL = "https://lab.flashalpha.com/v1"
 _VIX_CACHE = {"at": 0.0, "vix": 18.0, "vix3m": None, "last_fresh_at": 0.0, "fetch_ok": False, "source": None}
 # Rolling VIX baseline (지수 이동 평균) — 스파이크 감지용.
-# Persists across Vercel cold starts via local /tmp file (best-effort);
-# Upstash KV would be more reliable but adds a remote call per request.
+# Persists across Vercel cold starts: first try Upstash KV (shared
+# across all instances), fall back to local /tmp file when KV creds
+# are not configured.
 _VIX_BASELINE_FILE = os.path.join("/tmp" if os.getenv("VERCEL") else "data_cache",
                                    "vix_baseline.json")
+_VIX_BASELINE_KV_KEY = "vix_baseline_ema"
 _VIX_BASELINE = {"ema": None, "alpha": 0.05}
 
 
+def _kv_get(key):
+    """Best-effort GET from Upstash KV. Returns parsed value or None."""
+    base, token = _kv_credentials()
+    if not base or not token:
+        return None
+    try:
+        r = requests.get(f"{base}/get/{key}",
+                         headers={"Authorization": f"Bearer {token}"},
+                         timeout=2)
+        if r.status_code == 200:
+            raw = r.json().get("result")
+            if raw is None:
+                return None
+            try:
+                return json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                return raw
+    except Exception:
+        pass
+    return None
+
+
+def _kv_set(key, value, ttl_sec=None):
+    """Best-effort SET to Upstash KV. Returns True/False."""
+    base, token = _kv_credentials()
+    if not base or not token:
+        return False
+    try:
+        body = ["SET", key, json.dumps(value)]
+        if ttl_sec:
+            body += ["EX", str(int(ttl_sec))]
+        r = requests.post(base, json=body,
+                          headers={"Authorization": f"Bearer {token}"},
+                          timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
 def _load_vix_baseline():
-    """Hydrate _VIX_BASELINE from /tmp on cold start (Vercel-friendly)."""
+    """Hydrate _VIX_BASELINE on cold start: KV first, then /tmp fallback."""
+    # 1. Upstash KV (shared across Vercel instances)
+    kv_val = _kv_get(_VIX_BASELINE_KV_KEY)
+    if isinstance(kv_val, dict) and isinstance(kv_val.get("ema"), (int, float)):
+        _VIX_BASELINE["ema"] = float(kv_val["ema"])
+        return
+    # 2. Local /tmp fallback
     try:
         if os.path.exists(_VIX_BASELINE_FILE):
             with open(_VIX_BASELINE_FILE, "r") as f:
@@ -152,15 +200,20 @@ def _load_vix_baseline():
 
 
 def _save_vix_baseline():
+    payload = {"ema": _VIX_BASELINE["ema"]}
+    # 1. KV (24h TTL — re-anchored daily anyway)
+    _kv_set(_VIX_BASELINE_KV_KEY, payload, ttl_sec=86400)
+    # 2. Local /tmp fallback (always write so degrade-to-local works)
     try:
         os.makedirs(os.path.dirname(_VIX_BASELINE_FILE), exist_ok=True)
         with open(_VIX_BASELINE_FILE, "w") as f:
-            json.dump({"ema": _VIX_BASELINE["ema"]}, f)
+            json.dump(payload, f)
     except Exception:
         pass
 
 
-_load_vix_baseline()
+# _load_vix_baseline() deferred until after _kv_credentials is defined
+# (it consults KV before the /tmp fallback). Called below near the bottom.
 VIX_CACHE_SEC = int(os.getenv("VIX_CACHE_SEC", "45"))
 YAHOO_UA = "Mozilla/5.0 (compatible; ESFutures/2.0)"
 
@@ -890,6 +943,11 @@ def _kv_credentials():
              or os.getenv("KV_REST_API_TOKEN", ""))
     return (url, token) if url and token else (None, None)
 
+
+# Now that _kv_credentials is defined, hydrate the VIX baseline
+# (KV first, /tmp fallback).
+_load_vix_baseline()
+
 def _storage_backend():
     url, token = _kv_credentials()
     if url and token:
@@ -1571,6 +1629,30 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": "Internal Server Error"}).encode('utf-8'))
 
+    def _handle_health(self):
+        """JSON snapshot of recent errors + counters. Auth required."""
+        origin = self.headers.get("Origin", "")
+        cookie_header = self.headers.get("Cookie", "")
+        if "access_token=valid" not in cookie_header and not auth_bypass_enabled():
+            self.send_response(401)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', origin if is_origin_allowed(origin) else 'https://hannaealgo.vercel.app')
+            self.end_headers()
+            self.wfile.write(b'{"error":"Unauthorized"}')
+            return
+
+        payload = _health_snapshot(limit=50)
+        payload["vix_baseline"] = _VIX_BASELINE.get("ema")
+        payload["vix_baseline_source"] = "KV+tmp" if _kv_credentials()[0] else "tmp_only"
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', origin if is_origin_allowed(origin) else 'https://hannaealgo.vercel.app')
+        self.send_header('Access-Control-Allow-Credentials', 'true')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode('utf-8'))
+
     def _handle_stream(self):
         """Server-Sent Events stream. 1 event every ~5s for ~55s, then closes.
 
@@ -1580,6 +1662,19 @@ class handler(BaseHTTPRequestHandler):
         """
         import time as _t
         origin = self.headers.get("Origin", "")
+
+        # Rate limit (per-IP, same 15/min bucket as /api/data).
+        # SSE holds a connection for up to 55s so it can consume more
+        # of the quota — but capping here prevents abusing it as a DoS.
+        ip = self.headers.get("x-forwarded-for", "127.0.0.1").split(',')[0].strip()
+        if not check_rate_limit(ip, 15):
+            self.send_response(429)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', origin if is_origin_allowed(origin) else 'https://hannaealgo.vercel.app')
+            self.end_headers()
+            self.wfile.write(b'{"error":"Rate limit exceeded"}')
+            return
+
         # Auth check (cookie required for streaming too)
         cookie_header = self.headers.get("Cookie", "")
         if "access_token=valid" not in cookie_header and not auth_bypass_enabled():
@@ -1646,6 +1741,10 @@ class handler(BaseHTTPRequestHandler):
         # Falls back to single payload + close when SSE handshake fails.
         if self.path.startswith("/api/stream") or self.path.startswith("/api/data?stream=1"):
             return self._handle_stream()
+
+        # Health endpoint — auth-gated, no rate limit (operator visibility).
+        if self.path.startswith("/api/health"):
+            return self._handle_health()
 
         # Resolve client IP & Check Rate limit
         ip = self.headers.get("x-forwarded-for", "127.0.0.1").split(',')[0].strip()
@@ -2242,6 +2341,7 @@ class handler(BaseHTTPRequestHandler):
             # Bucket by 5-minute window so identical signals across short
             # spans keep returning 304 (was per-minute → every minute the
             # ETag flipped and forced a 200, wasting bandwidth).
+            of_layer = score_result["layers"].get("options_flow", {})
             etag_basis = {
                 "grade": signal.get("grade"),
                 "score": normalized,
@@ -2250,6 +2350,11 @@ class handler(BaseHTTPRequestHandler):
                 "open_pos": today_str in (portfolio.get("positions") or {}),
                 "dd": daily_dd_pct,
                 "tail": tail_risk.get("status"),
+                # Track OF transitions so a flip in options sentiment
+                # invalidates the ETag even if normalized score didn't move.
+                "of_dir": of_layer.get("direction"),
+                "of_status": of_layer.get("status"),
+                "macro": score_result["layers"].get("macro_gate", {}).get("status"),
             }
             import hashlib
             etag = '"' + hashlib.md5(json.dumps(etag_basis, sort_keys=True).encode()).hexdigest()[:16] + '"'
