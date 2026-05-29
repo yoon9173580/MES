@@ -765,9 +765,19 @@ function renderEntryDiagnostic(py) {
   const atStr = (pA && pA.score > 0 && (!pT || pA.score !== pT.score || pA.date !== pT.date))
     ? ` · 전체 최고 <span class="mono" style="color:#c084fc;font-weight:700">${pA.score}</span>@${pA.date} ${pA.minute || ''} (${pA.grade})`
     : '';
-  const storageWarn = !ed.kv_persisted
-    ? ` <span style="color:#ff7070;font-size:0.62rem">⚠️ 휘발 저장 (Upstash KV 미연결 — 콜드스타트시 리셋)</span>`
-    : ` <span style="color:#3dd68c;font-size:0.62rem">● KV 영속</span>`;
+  // Three-state badge: KV not configured / configured but write failed / persisting OK
+  let storageWarn;
+  if (ed.kv_configured && ed.kv_persisted) {
+    storageWarn = ` <span style="color:#3dd68c;font-size:0.62rem">● KV 영속</span>`;
+  } else if (ed.kv_configured && !ed.kv_persisted) {
+    storageWarn = ` <span style="color:#f0a23a;font-size:0.62rem">⚠️ KV 쓰기 실패 (config OK, 원격 미도달)</span>`;
+  } else {
+    storageWarn = ` <span style="color:#ff7070;font-size:0.62rem">⚠️ 휘발 저장 (Upstash KV 미연결 — 콜드스타트시 리셋)</span>`;
+  }
+  // Add explicit save-skip warning when guard fired
+  if (ed.save_skipped) {
+    storageWarn += ` <span style="color:#ff7070;font-size:0.62rem">⚠️ ${ed.save_skipped}</span>`;
+  }
   const countStr = ed.samples_count != null
     ? ` <span style="color:#445;font-size:0.65rem">[누적 ${ed.samples_count}샘플 · ${ed.daily_peaks_count || 0}일 보존]${storageWarn}</span>`
     : '';
@@ -1605,6 +1615,7 @@ function renderBacktestSummary(py) {
 
     <!-- Portfolio Heat + Tail Risk -->
     ${renderHeatAndTailRisk(py)}
+    ${renderDataHealth(py)}
 
     <!-- Multi-Instrument Futures Strip -->
     ${renderFuturesMultiStrip(py)}
@@ -1615,6 +1626,48 @@ function renderBacktestSummary(py) {
 }
 
 // ── Portfolio Heat & Tail Risk widgets ──
+// Data Health — surface any DOWN/STALE data sources prominently so
+// the operator immediately sees when Alpaca / VIX / FlashAlpha is
+// failing. CLOSED is the normal off-hours state (not an error).
+function renderDataHealth(py) {
+  const dh = py.data_health;
+  if (!dh) return '';
+  const entries = [
+    {k:'alpaca_snapshots', label:'Alpaca Snap'},
+    {k:'alpaca_bars',      label:'Alpaca Bars'},
+    {k:'vix',              label:'VIX'},
+    {k:'flashalpha',       label:'FlashAlpha'},
+  ];
+  const colorFor = (s) => {
+    if (s === 'OK' || s === 'LIVE') return '#3dd68c';
+    if (s === 'STALE')               return '#f0a23a';
+    if (s === 'DOWN' || s === 'ERROR') return '#ff7070';
+    if (s === 'CLOSED')              return '#445';
+    return '#8899cc';
+  };
+  // Only render if at least one source is in a non-OK / non-CLOSED state
+  const hasIssue = entries.some(e => {
+    const s = dh[e.k];
+    return s && s !== 'OK' && s !== 'LIVE' && s !== 'CLOSED';
+  });
+  // Always render for visibility (but compact)
+  const pills = entries.map(e => {
+    const s = dh[e.k] || '?';
+    const c = colorFor(s);
+    return `<span style="font-size:9px;background:#0c1428;border:1px solid ${c};border-radius:10px;padding:2px 8px;color:${c}"><span style="opacity:.7">${e.label}:</span>&nbsp;<b>${s}</b></span>`;
+  }).join(' ');
+  const headerColor = hasIssue ? '#ff7070' : '#8899cc';
+  return `
+    <div style="margin-top:10px;background:${hasIssue?'#1a0e0e':'#0c1428'};border:1px solid ${hasIssue?'#6b1b1b':'#1a3060'};border-radius:10px;padding:8px 10px">
+      <div style="font-size:9px;color:${headerColor};letter-spacing:.1em;font-weight:700;margin-bottom:4px;text-transform:uppercase">
+        ${hasIssue ? '⚠️ Data Health' : 'Data Health'}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">${pills}</div>
+      ${hasIssue ? `<div style="margin-top:4px;font-size:9px;color:#ff7070">⚠️ 일부 데이터 소스 이상 — score 계산 정확도 저하 가능</div>` : ''}
+    </div>
+  `;
+}
+
 function renderHeatAndTailRisk(py) {
   const ph = py.portfolio_heat || {};
   const tr = py.tail_risk || {};

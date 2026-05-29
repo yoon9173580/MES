@@ -1543,6 +1543,18 @@ def _record_position_close(portfolio, open_pos, today_str, now, spy_p, exit_val,
     del portfolio["positions"][today_str]
 
 def save_portfolio(pf):
+    # GUARD: if the loaded portfolio failed to fetch (KV transient
+    # failure) AND the in-memory pf still has the default cash + zero
+    # history, REFUSE to write — otherwise we'd overwrite KV with
+    # defaults, destroying real accumulated state (score_samples,
+    # peak_score, daily_peaks, trade history).
+    if (pf.get("_load_ok") is False
+            and pf.get("cash") == STARTING_BALANCE
+            and not (pf.get("history") or [])
+            and not (pf.get("trade_log") or [])
+            and not (pf.get("positions") or {})):
+        pf["_save_skipped"] = "LOAD_FAILED_REFUSING_DEFAULT_OVERWRITE"
+        return False
     try:
         remote = _fetch_raw_portfolio() or {}
         remote_pf = _normalize_pf(remote) if remote else _default_pf()
@@ -2512,7 +2524,13 @@ class handler(BaseHTTPRequestHandler):
                     ),
                     "daily_peaks_count": len(portfolio.get("daily_peaks") or []),
                     "storage_backend": portfolio.get("_storage") or _storage_backend(),
-                    "kv_persisted": _storage_backend() == "upstash",
+                    # KV "persisted" only when (a) configured AND (b) the most
+                    # recent save actually reached the remote — bare config
+                    # presence (kv_configured) is a separate field.
+                    "kv_configured": _storage_backend() == "upstash",
+                    "kv_persisted": (_storage_backend() == "upstash"
+                                     and portfolio.get("_remote_ok") is True),
+                    "save_skipped": portfolio.get("_save_skipped"),
                 },
                 "ic_signal": _build_ic_signal(now, spy_p, spy_prev, spy_h, vix_p,
                                               pcts_data, score_result, vol_r),
@@ -2549,6 +2567,10 @@ class handler(BaseHTTPRequestHandler):
                 "grade": signal.get("grade"),
                 "score": normalized,
                 "bias": direction_bias,
+                # Include date so identical signals on different days
+                # never collide (was: hour:minute/5 only → 00:01 day-1
+                # and 00:01 day-2 had same ETag when score stayed at 0).
+                "date": session_date_today,
                 "bucket": f"{now.hour}:{now.minute // 5}",
                 "open_pos": today_str in (portfolio.get("positions") or {}),
                 "dd": daily_dd_pct,
