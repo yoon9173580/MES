@@ -1909,6 +1909,9 @@ class handler(BaseHTTPRequestHandler):
             if portfolio.get("daily_session_date") != session_date_today:
                 portfolio["daily_start_value"] = current_val
                 portfolio["daily_session_date"] = session_date_today
+                # New day → fresh per-minute score buffer for diagnostics
+                portfolio["score_samples_today"] = []
+                portfolio["peak_score_today"] = {"score": 0, "minute": None, "grade": "NONE", "bias": "NEUTRAL"}
             daily_anchor = float(portfolio.get("daily_start_value", current_val) or current_val)
             daily_dd_pct = round((daily_anchor - current_val) / daily_anchor * 100, 2) if daily_anchor > 0 else 0.0
             if daily_dd_pct >= DAILY_LOSS_LIMIT * 100 and grade != "LOCKED":
@@ -1975,6 +1978,38 @@ class handler(BaseHTTPRequestHandler):
                 entry_passed, entry_reason = False, f"SESSION_{('CLOSED' if not is_regular else 'REGULAR')}"
             else:
                 entry_passed, entry_reason = _entry_check(grade, direction_bias, score_result, portfolio, now)
+
+            # ── Score samples ring buffer (post-hoc diagnostics) ──
+            # Every poll during regular hours records a snapshot so the
+            # user can answer 'when did score peak today?' even if no
+            # trade fired. Sampled at 1-minute granularity to keep size
+            # bounded (~390 entries per session day).
+            if is_regular:
+                cur_min_str = now.strftime("%H:%M")
+                samples = portfolio.setdefault("score_samples_today", [])
+                # Dedupe by minute — overwrite if same minute polls twice
+                if not samples or samples[-1].get("min") != cur_min_str:
+                    samples.append({
+                        "min":    cur_min_str,
+                        "score":  normalized,
+                        "grade":  grade,
+                        "bias":   direction_bias,
+                        "reason": entry_reason if not entry_passed else "ENTRY_OK",
+                    })
+                    # Cap at 400 entries (full session + margin)
+                    if len(samples) > 400:
+                        portfolio["score_samples_today"] = samples[-400:]
+                # Track peak score of the day
+                peak = portfolio.setdefault("peak_score_today",
+                                             {"score": 0, "minute": None, "grade": "NONE", "bias": "NEUTRAL"})
+                if normalized > peak.get("score", 0):
+                    peak.update({
+                        "score":  normalized,
+                        "minute": cur_min_str,
+                        "grade":  grade,
+                        "bias":   direction_bias,
+                    })
+
             if entry_passed:
                 cash = portfolio["cash"]
                 es_direction = direction_bias
@@ -2358,6 +2393,8 @@ class handler(BaseHTTPRequestHandler):
                     "reason": entry_reason,
                     "human": "✅ Entry criteria met — order submitted" if entry_passed
                              else f"⏸ Blocked: {entry_reason}",
+                    "peak_today": portfolio.get("peak_score_today"),
+                    "samples_today_count": len(portfolio.get("score_samples_today") or []),
                 },
                 "ic_signal": _build_ic_signal(now, spy_p, spy_prev, spy_h, vix_p,
                                               pcts_data, score_result, vol_r),

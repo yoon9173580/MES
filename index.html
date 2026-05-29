@@ -717,19 +717,22 @@ function renderEntryDiagnostic(py) {
   const ed = py.entry_diagnostic;
   const el = document.getElementById('entryDiagnostic');
   if (!el || !ed) return;
+  const peak = ed.peak_today;
+  const peakStr = (peak && peak.minute)
+    ? ` · 오늘 최고: <span class="mono" style="color:#60a5fa;font-weight:700">${peak.score}</span> at ${peak.minute} (${peak.grade})`
+    : '';
   if (ed.passed) {
     el.style.display = 'block';
     el.style.background = '#0c2b1f';
     el.style.borderColor = '#1e6b3f';
     el.style.color = '#3dd68c';
-    el.textContent = ed.human;
+    el.innerHTML = ed.human + peakStr;
   } else {
     el.style.display = 'block';
     el.style.background = '#1a1a2e';
     el.style.borderColor = '#2a2a3e';
     el.style.color = '#8899cc';
-    // Keep it brief — show the reason tag prominently
-    el.innerHTML = `<span style="color:#556">진입 대기:</span> <span class="mono" style="color:var(--warn);font-weight:700">${ed.reason}</span>`;
+    el.innerHTML = `<span style="color:#556">진입 대기:</span> <span class="mono" style="color:var(--warn);font-weight:700">${ed.reason}</span>${peakStr}`;
   }
 }
 
