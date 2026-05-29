@@ -713,26 +713,35 @@ function renderLayerBars(layers) {
 }
 
 // Entry diagnostic — explains *why* paper-trade hasn't fired.
+// Now shows both today's running peak AND the all-time peak
+// (samples + peak persist across days, never reset on rollover).
 function renderEntryDiagnostic(py) {
   const ed = py.entry_diagnostic;
   const el = document.getElementById('entryDiagnostic');
   if (!el || !ed) return;
-  const peak = ed.peak_today;
-  const peakStr = (peak && peak.minute)
-    ? ` · 오늘 최고: <span class="mono" style="color:#60a5fa;font-weight:700">${peak.score}</span> at ${peak.minute} (${peak.grade})`
+  const pT = ed.peak_today;
+  const pA = ed.peak_all_time;
+  const todayStr = (pT && pT.minute)
+    ? ` · 오늘 최고 <span class="mono" style="color:#60a5fa;font-weight:700">${pT.score}</span>@${pT.minute} (${pT.grade})`
+    : '';
+  const atStr = (pA && pA.score > 0 && (!pT || pA.score !== pT.score || pA.date !== pT.date))
+    ? ` · 전체 최고 <span class="mono" style="color:#c084fc;font-weight:700">${pA.score}</span>@${pA.date} ${pA.minute || ''} (${pA.grade})`
+    : '';
+  const countStr = ed.samples_count
+    ? ` <span style="color:#445;font-size:0.65rem">[누적 ${ed.samples_count}샘플 · ${ed.daily_peaks_count || 0}일 보존]</span>`
     : '';
   if (ed.passed) {
     el.style.display = 'block';
     el.style.background = '#0c2b1f';
     el.style.borderColor = '#1e6b3f';
     el.style.color = '#3dd68c';
-    el.innerHTML = ed.human + peakStr;
+    el.innerHTML = ed.human + todayStr + atStr + countStr;
   } else {
     el.style.display = 'block';
     el.style.background = '#1a1a2e';
     el.style.borderColor = '#2a2a3e';
     el.style.color = '#8899cc';
-    el.innerHTML = `<span style="color:#556">진입 대기:</span> <span class="mono" style="color:var(--warn);font-weight:700">${ed.reason}</span>${peakStr}`;
+    el.innerHTML = `<span style="color:#556">진입 대기:</span> <span class="mono" style="color:var(--warn);font-weight:700">${ed.reason}</span>${todayStr}${atStr}${countStr}`;
   }
 }
 

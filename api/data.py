@@ -875,6 +875,32 @@ def _normalize_pf(pf):
     base["history"] = base.get("history") or []
     base["trade_log"] = base.get("trade_log") or []
 
+    # ── Migration: score_samples_today → score_samples (continuous) ──
+    # Previous schema (one-day-only) is auto-promoted to the new
+    # cumulative buffer. Old peak_score_today becomes today's internal
+    # peak; a separate all-time peak_score is initialised from it.
+    if "score_samples_today" in base and "score_samples" not in base:
+        old_session = base.get("daily_session_date")
+        migrated = []
+        for s in base.get("score_samples_today") or []:
+            mig = dict(s)
+            mig.setdefault("date", old_session)
+            mig.setdefault("ts", f"{old_session} {s.get('min','??:??')}")
+            migrated.append(mig)
+        base["score_samples"] = migrated
+        base.pop("score_samples_today", None)
+    if "peak_score_today" in base and "peak_score" not in base:
+        old_peak = base["peak_score_today"]
+        base["peak_score"] = {
+            "score":  old_peak.get("score", 0),
+            "date":   base.get("daily_session_date"),
+            "minute": old_peak.get("minute"),
+            "grade":  old_peak.get("grade", "NONE"),
+            "bias":   old_peak.get("bias", "NEUTRAL"),
+        }
+        base["peak_score_today_internal"] = dict(base["peak_score"])
+        base.pop("peak_score_today", None)
+
     # Auto-recover: rebuild trade_log from history when trade_log is empty.
     # Each closed history record represents a complete trade lifecycle, so
     # emit BOTH the OPEN and CLOSE events — emitting only CLOSE produced a
@@ -1909,9 +1935,21 @@ class handler(BaseHTTPRequestHandler):
             if portfolio.get("daily_session_date") != session_date_today:
                 portfolio["daily_start_value"] = current_val
                 portfolio["daily_session_date"] = session_date_today
-                # New day → fresh per-minute score buffer for diagnostics
-                portfolio["score_samples_today"] = []
-                portfolio["peak_score_today"] = {"score": 0, "minute": None, "grade": "NONE", "bias": "NEUTRAL"}
+                # On day rollover, snapshot yesterday's peak into daily_peaks
+                # (no buffer wipe — score_samples + peak_score accumulate).
+                yday_peak = portfolio.get("peak_score_today_internal")
+                if yday_peak and yday_peak.get("minute"):
+                    dp = portfolio.setdefault("daily_peaks", [])
+                    dp.append(yday_peak)
+                    # Keep last 90 days (~4 months) of peaks
+                    if len(dp) > 90:
+                        portfolio["daily_peaks"] = dp[-90:]
+                # Reset only the *internal* today-tracker (used to compute
+                # daily snapshot). score_samples + peak_score persist.
+                portfolio["peak_score_today_internal"] = {
+                    "date": session_date_today,
+                    "score": 0, "minute": None, "grade": "NONE", "bias": "NEUTRAL",
+                }
             daily_anchor = float(portfolio.get("daily_start_value", current_val) or current_val)
             daily_dd_pct = round((daily_anchor - current_val) / daily_anchor * 100, 2) if daily_anchor > 0 else 0.0
             if daily_dd_pct >= DAILY_LOSS_LIMIT * 100 and grade != "LOCKED":
@@ -1979,31 +2017,50 @@ class handler(BaseHTTPRequestHandler):
             else:
                 entry_passed, entry_reason = _entry_check(grade, direction_bias, score_result, portfolio, now)
 
-            # ── Score samples ring buffer (post-hoc diagnostics) ──
-            # Every poll during regular hours records a snapshot so the
-            # user can answer 'when did score peak today?' even if no
-            # trade fired. Sampled at 1-minute granularity to keep size
-            # bounded (~390 entries per session day).
+            # ── Score samples + peak tracker (continuous, no daily wipe) ──
+            # score_samples persists across days as a rolling 2000-entry
+            # buffer (~5 trading days). peak_score is all-time. A separate
+            # peak_score_today_internal tracks the running daily max which
+            # gets archived to daily_peaks on date rollover (above).
             if is_regular:
                 cur_min_str = now.strftime("%H:%M")
-                samples = portfolio.setdefault("score_samples_today", [])
-                # Dedupe by minute — overwrite if same minute polls twice
-                if not samples or samples[-1].get("min") != cur_min_str:
+                cur_dt_str  = f"{session_date_today} {cur_min_str}"
+                samples = portfolio.setdefault("score_samples", [])
+                # Dedupe by (day, minute) — overwrite if same minute polls twice
+                if not samples or samples[-1].get("ts") != cur_dt_str:
                     samples.append({
+                        "ts":     cur_dt_str,
+                        "date":   session_date_today,
                         "min":    cur_min_str,
                         "score":  normalized,
                         "grade":  grade,
                         "bias":   direction_bias,
                         "reason": entry_reason if not entry_passed else "ENTRY_OK",
                     })
-                    # Cap at 400 entries (full session + margin)
-                    if len(samples) > 400:
-                        portfolio["score_samples_today"] = samples[-400:]
-                # Track peak score of the day
-                peak = portfolio.setdefault("peak_score_today",
-                                             {"score": 0, "minute": None, "grade": "NONE", "bias": "NEUTRAL"})
+                    # Cap at 2000 entries (~5 trading days), rolling
+                    if len(samples) > 2000:
+                        portfolio["score_samples"] = samples[-2000:]
+
+                # All-time peak tracker
+                peak = portfolio.setdefault("peak_score",
+                                             {"score": 0, "date": None, "minute": None,
+                                              "grade": "NONE", "bias": "NEUTRAL"})
                 if normalized > peak.get("score", 0):
                     peak.update({
+                        "score":  normalized,
+                        "date":   session_date_today,
+                        "minute": cur_min_str,
+                        "grade":  grade,
+                        "bias":   direction_bias,
+                    })
+
+                # Today's intra-day peak (used for daily_peaks archival)
+                today_peak = portfolio.setdefault("peak_score_today_internal",
+                                                   {"date": session_date_today, "score": 0,
+                                                    "minute": None, "grade": "NONE", "bias": "NEUTRAL"})
+                if normalized > today_peak.get("score", 0):
+                    today_peak.update({
+                        "date":   session_date_today,
                         "score":  normalized,
                         "minute": cur_min_str,
                         "grade":  grade,
@@ -2393,8 +2450,14 @@ class handler(BaseHTTPRequestHandler):
                     "reason": entry_reason,
                     "human": "✅ Entry criteria met — order submitted" if entry_passed
                              else f"⏸ Blocked: {entry_reason}",
-                    "peak_today": portfolio.get("peak_score_today"),
-                    "samples_today_count": len(portfolio.get("score_samples_today") or []),
+                    "peak_today": portfolio.get("peak_score_today_internal"),
+                    "peak_all_time": portfolio.get("peak_score"),
+                    "samples_count": len(portfolio.get("score_samples") or []),
+                    "samples_today_count": sum(
+                        1 for s in (portfolio.get("score_samples") or [])
+                        if s.get("date") == session_date_today
+                    ),
+                    "daily_peaks_count": len(portfolio.get("daily_peaks") or []),
                 },
                 "ic_signal": _build_ic_signal(now, spy_p, spy_prev, spy_h, vix_p,
                                               pcts_data, score_result, vol_r),
