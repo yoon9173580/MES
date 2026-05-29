@@ -494,6 +494,7 @@ body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%
   <!-- Briefing -->
   <div class="briefing-bar" id="briefing">Connecting to signal engine...</div>
   <div id="macroBanner" style="display:none;border-radius:10px;padding:8px 14px;margin-bottom:1rem;font-size:0.78rem;font-weight:600;text-align:center"></div>
+  <div id="entryDiagnostic" style="display:none;background:#0c1428;border:1px solid #1a3060;border-radius:10px;padding:8px 14px;margin-bottom:1rem;font-size:0.75rem;text-align:center;color:#8899cc"></div>
 
   <!-- Strike Recommendation -->
   <div class="strike-box" id="strikeWidget" style="display:none">
@@ -711,6 +712,27 @@ function renderLayerBars(layers) {
   }).join('');
 }
 
+// Entry diagnostic — explains *why* paper-trade hasn't fired.
+function renderEntryDiagnostic(py) {
+  const ed = py.entry_diagnostic;
+  const el = document.getElementById('entryDiagnostic');
+  if (!el || !ed) return;
+  if (ed.passed) {
+    el.style.display = 'block';
+    el.style.background = '#0c2b1f';
+    el.style.borderColor = '#1e6b3f';
+    el.style.color = '#3dd68c';
+    el.textContent = ed.human;
+  } else {
+    el.style.display = 'block';
+    el.style.background = '#1a1a2e';
+    el.style.borderColor = '#2a2a3e';
+    el.style.color = '#8899cc';
+    // Keep it brief — show the reason tag prominently
+    el.innerHTML = `<span style="color:#556">진입 대기:</span> <span class="mono" style="color:var(--warn);font-weight:700">${ed.reason}</span>`;
+  }
+}
+
 // Macro gate banner — surfaces FOMC / CPI / NFP / PPI windows.
 function renderMacroBanner(layers) {
   const m = layers?.macro_gate;
@@ -894,6 +916,7 @@ function render(py) {
   // Layer Bars
   renderLayerBars(py.layers);
   renderMacroBanner(py.layers);
+  renderEntryDiagnostic(py);
 
   // Time Window
   const tw = py.layers?.time_window;

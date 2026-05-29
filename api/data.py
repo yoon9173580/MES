@@ -1305,8 +1305,12 @@ def _close_trade(pos, now, spy_p, exit_val, exit_type):
 
 
 
-def _entry_criteria_met(grade, direction_bias, score_result, portfolio=None, now=None):
-    """MES Futures entry criteria — backtest-tuned thresholds.
+def _entry_check(grade, direction_bias, score_result, portfolio=None, now=None):
+    """MES Futures entry check — returns (passed: bool, reason: str).
+
+    Reason is a short tag for the dashboard so users can see *why*
+    entries aren't firing. Previously this returned a bare bool which
+    left "why didn't I enter?" silent.
 
     3-year backtest revealed:
       • Score 90-100 is the sweet spot (WR 68-80%)
@@ -1317,49 +1321,37 @@ def _entry_criteria_met(grade, direction_bias, score_result, portfolio=None, now
     """
     layers = score_result.get("layers", {})
 
-    # Risk lock or locked signal
     if layers.get("risk", {}).get("passed") is False or grade == "LOCKED":
-        return False
+        return False, "RISK_LOCKED"
 
-    # Must be STRONG signal
     if grade != "STRONG":
-        return False
+        return False, f"GRADE_{grade or 'NONE'}_NOT_STRONG"
 
-    # Score sweet spot enforcement — score 90-100 only.
-    # Above 100 the backtest showed diminishing/negative returns
-    # (likely over-extension when many layers max out simultaneously).
     total_score = score_result.get("total_score", 0)
-    if not (90 <= total_score <= 100):
-        return False
+    if total_score > 100:
+        return False, f"SCORE_{total_score}_OVER_100"
+    if total_score < 90:
+        return False, f"SCORE_{total_score}_UNDER_90"
 
-    # Must be in PRIME or GAMMA time window (score 20 = prime)
-    if layers.get("time_window", {}).get("score", 0) < 20:
-        return False
+    tw_score = layers.get("time_window", {}).get("score", 0)
+    if tw_score < 20:
+        tw_label = layers.get("time_window", {}).get("window", "?")
+        return False, f"TIME_WINDOW_{tw_label}_SCORE_{tw_score}<20"
 
-    # Must have clear directional bias
     if direction_bias not in ("LONG", "SHORT"):
-        return False
+        return False, f"DIRECTION_{direction_bias or 'NONE'}"
 
-    # SHORT requires stronger setup — backtest has only 7 SHORT trades in
-    # 3 years (vs 71 LONG), so SHORT is statistically under-validated.
-    # Require score >= 93 for SHORT (more selective).
     if direction_bias == "SHORT" and total_score < 93:
-        return False
+        return False, f"SHORT_SCORE_{total_score}<93"
 
-    # VIX guard — backtest has only 2 trades with VIX>20 (1W/1L).
-    # Block entries when VIX is too high to be safely backtested.
     vix_val = layers.get("regime", {}).get("details", {}).get("vix", {}).get("detail", "")
-    # Parse VIX from detail string (e.g. "VIX 18.5 — Normal range")
     try:
         vix_num = float(vix_val.split()[1]) if vix_val.startswith("VIX ") else None
     except (IndexError, ValueError):
         vix_num = None
     if vix_num is not None and vix_num > 25.0:
-        return False
+        return False, f"VIX_{vix_num:.1f}>25"
 
-    # Daily loss limit halt — stop trading if down > 6% today.
-    # Anchor is the day-open equity (daily_start_value), refreshed once per
-    # session by the caller — not the original initial balance.
     if portfolio:
         anchor = float(portfolio.get("daily_start_value")
                        or portfolio.get("initial_balance", STARTING_BALANCE)
@@ -1367,19 +1359,21 @@ def _entry_criteria_met(grade, direction_bias, score_result, portfolio=None, now
         current = float(portfolio.get("current_value", anchor) or anchor)
         daily_dd = (anchor - current) / anchor if anchor > 0 else 0
         if daily_dd >= DAILY_LOSS_LIMIT:
-            return False
+            return False, f"DAILY_DD_{daily_dd*100:.1f}%>{DAILY_LOSS_LIMIT*100:.0f}%"
 
-    # Skip trading during quarterly contract roll (Mon-Wed of the week
-    # before 3rd Friday in Mar/Jun/Sep/Dec — liquidity migrates between
-    # contracts and slippage spikes).
     if now and _is_quarterly_roll_window(now):
-        return False
+        return False, "QUARTERLY_ROLL_WINDOW"
 
-    # Max 1 open position
     if portfolio and len(portfolio.get("positions", {})) >= MAX_OPEN_TRADES:
-        return False
+        return False, f"ALREADY_{MAX_OPEN_TRADES}_OPEN"
 
-    return True
+    return True, "ENTRY_OK"
+
+
+def _entry_criteria_met(grade, direction_bias, score_result, portfolio=None, now=None):
+    """Back-compat shim — bool only (existing call sites)."""
+    passed, _ = _entry_check(grade, direction_bias, score_result, portfolio, now)
+    return passed
 
 
 # Futures meta helpers extracted to api/lib/futures_meta.py
@@ -1974,7 +1968,14 @@ class handler(BaseHTTPRequestHandler):
 
             # 2. Check for entry — ES Futures (direct contract, no spreads)
             open_pos = portfolio.get("positions", {}).get(today_str)
-            if not open_pos and is_regular and _entry_criteria_met(grade, direction_bias, score_result, portfolio, now):
+            # Compute entry decision + diagnostic ONCE, surface in response
+            if open_pos:
+                entry_passed, entry_reason = False, "POSITION_ALREADY_OPEN"
+            elif not is_regular:
+                entry_passed, entry_reason = False, f"SESSION_{('CLOSED' if not is_regular else 'REGULAR')}"
+            else:
+                entry_passed, entry_reason = _entry_check(grade, direction_bias, score_result, portfolio, now)
+            if entry_passed:
                 cash = portfolio["cash"]
                 es_direction = direction_bias
                 
@@ -2352,6 +2353,12 @@ class handler(BaseHTTPRequestHandler):
                 "paper_trading_stats": paper_trading_stats,
                 "portfolio_heat": portfolio_heat,
                 "tail_risk": tail_risk,
+                "entry_diagnostic": {
+                    "passed": entry_passed,
+                    "reason": entry_reason,
+                    "human": "✅ Entry criteria met — order submitted" if entry_passed
+                             else f"⏸ Blocked: {entry_reason}",
+                },
                 "ic_signal": _build_ic_signal(now, spy_p, spy_prev, spy_h, vix_p,
                                               pcts_data, score_result, vol_r),
                 "feature_flags": _feature_flags_snapshot(),
