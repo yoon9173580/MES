@@ -731,8 +731,11 @@ function renderEntryDiagnostic(py) {
   const atStr = (pA && pA.score > 0 && (!pT || pA.score !== pT.score || pA.date !== pT.date))
     ? ` · 전체 최고 <span class="mono" style="color:#c084fc;font-weight:700">${pA.score}</span>@${pA.date} ${pA.minute || ''} (${pA.grade})`
     : '';
-  const countStr = ed.samples_count
-    ? ` <span style="color:#445;font-size:0.65rem">[누적 ${ed.samples_count}샘플 · ${ed.daily_peaks_count || 0}일 보존]</span>`
+  const storageWarn = !ed.kv_persisted
+    ? ` <span style="color:#ff7070;font-size:0.62rem">⚠️ 휘발 저장 (Upstash KV 미연결 — 콜드스타트시 리셋)</span>`
+    : ` <span style="color:#3dd68c;font-size:0.62rem">● KV 영속</span>`;
+  const countStr = ed.samples_count != null
+    ? ` <span style="color:#445;font-size:0.65rem">[누적 ${ed.samples_count}샘플 · ${ed.daily_peaks_count || 0}일 보존]${storageWarn}</span>`
     : '';
   if (ed.passed) {
     el.style.display = 'block';

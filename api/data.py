@@ -2503,6 +2503,8 @@ class handler(BaseHTTPRequestHandler):
                         if s.get("date") == session_date_today
                     ),
                     "daily_peaks_count": len(portfolio.get("daily_peaks") or []),
+                    "storage_backend": portfolio.get("_storage") or _storage_backend(),
+                    "kv_persisted": _storage_backend() == "upstash",
                 },
                 "ic_signal": _build_ic_signal(now, spy_p, spy_prev, spy_h, vix_p,
                                               pcts_data, score_result, vol_r),
