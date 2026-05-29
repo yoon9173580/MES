@@ -1695,6 +1695,61 @@ function renderHeatAndTailRisk(py) {
   `;
 }
 
+// ── Data Health widget ──────────────────────────────────────────────────
+// Surface any DOWN/STALE data sources prominently so the operator
+// immediately sees when Alpaca / VIX / FlashAlpha is failing.
+// CLOSED is the normal off-hours state (not an error).
+// VIX 'source' field (e.g. "cboe", "yahoo") is informational, NOT a status.
+function renderDataHealth(py) {
+  const dh = py.data_health;
+  if (!dh) return '';
+  const entries = [
+    {k:'alpaca_snapshots', label:'Alpaca Snap'},
+    {k:'alpaca_bars',      label:'Alpaca Bars'},
+    {k:'vix',              label:'VIX'},
+    {k:'flashalpha',       label:'FlashAlpha'},
+  ];
+  const statusValues = ['OK', 'LIVE', 'STALE', 'DOWN', 'ERROR', 'CLOSED'];
+  const colorFor = (s) => {
+    if (s === 'OK' || s === 'LIVE') return '#3dd68c';
+    if (s === 'STALE')               return '#f0a23a';
+    if (s === 'DOWN' || s === 'ERROR') return '#ff7070';
+    if (s === 'CLOSED')              return '#445';
+    return '#8899cc';  // informational labels (VIX source: cboe/yahoo/etc)
+  };
+  // Only flag as issue if a source has a genuinely bad status.
+  // VIX field holds source name (e.g. "cboe") — use vix_fetch_ok instead.
+  const hasIssue = entries.some(e => {
+    if (e.k === 'vix') {
+      // VIX uses vix_fetch_ok (boolean) for health, not the source label
+      return dh.vix_fetch_ok === false;
+    }
+    const s = dh[e.k];
+    return s && s !== 'OK' && s !== 'LIVE' && s !== 'CLOSED';
+  });
+  const pills = entries.map(e => {
+    let s = dh[e.k] || '?';
+    let c;
+    if (e.k === 'vix') {
+      // Show source label but color by fetch health
+      c = dh.vix_fetch_ok !== false ? '#3dd68c' : '#ff7070';
+    } else {
+      c = colorFor(s);
+    }
+    return `<span style="font-size:9px;background:#0c1428;border:1px solid ${c};border-radius:10px;padding:2px 8px;color:${c}"><span style="opacity:.7">${e.label}:</span>&nbsp;<b>${s}</b></span>`;
+  }).join(' ');
+  const headerColor = hasIssue ? '#ff7070' : '#8899cc';
+  return `
+    <div style="margin-top:10px;background:${hasIssue?'#1a0e0e':'#0c1428'};border:1px solid ${hasIssue?'#6b1b1b':'#1a3060'};border-radius:10px;padding:8px 10px">
+      <div style="font-size:9px;color:${headerColor};letter-spacing:.1em;font-weight:700;margin-bottom:4px;text-transform:uppercase">
+        ${hasIssue ? '⚠️ Data Health' : 'Data Health'}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">${pills}</div>
+      ${hasIssue ? `<div style="margin-top:4px;font-size:9px;color:#ff7070">⚠️ 일부 데이터 소스 이상 — score 계산 정확도 저하 가능</div>` : ''}
+    </div>
+  `;
+}
+
 // ── Multi-Instrument Micro-Futures Strip ──
 function renderFuturesMultiStrip(py) {
   const fm = py.futures_multi || {};

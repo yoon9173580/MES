@@ -2435,17 +2435,34 @@ class handler(BaseHTTPRequestHandler):
             # indicator instead of users wondering why a card is blank.
             # CLOSED status distinguishes "no data because market shut"
             # from "no data because API broke" — avoids false alarms.
+            #
+            # FlashAlpha STALE logic:
+            #   - Market closed → CLOSED (stale data is expected off-hours)
+            #   - Market open + Alpaca bars available → OK (Alpaca VWAP/vol fallback works)
+            #   - Market open + NO Alpaca bars → STALE (genuine degradation)
             market_closed = status == "closed"
             spy_h = bundle.get("spy_h")
             has_bars = spy_h is not None and not spy_h.empty
+
+            # Determine FlashAlpha effective status
+            if flashalpha_spy and not flashalpha_spy.get("is_stale"):
+                fa_status = "OK"
+            elif flashalpha_spy and flashalpha_spy.get("is_stale"):
+                if market_closed:
+                    fa_status = "CLOSED"  # expected: no updates off-hours
+                elif has_bars:
+                    fa_status = "OK"      # Alpaca bars provide VWAP/volume fallback
+                else:
+                    fa_status = "STALE"   # genuine issue: no fallback available
+            else:
+                fa_status = "CLOSED" if market_closed else "DOWN"
+
             data_health = {
                 "alpaca_snapshots": "OK" if bundle.get("snaps") else ("CLOSED" if market_closed else "DOWN"),
                 "alpaca_bars": "OK" if has_bars else ("CLOSED" if market_closed else "DOWN"),
                 "vix": _VIX_CACHE.get("source", "UNKNOWN"),
                 "vix_fetch_ok": bool(_VIX_CACHE.get("fetch_ok", False)),
-                "flashalpha": ("OK" if flashalpha_spy and not flashalpha_spy.get("is_stale")
-                               else ("STALE" if flashalpha_spy
-                                     else ("CLOSED" if market_closed else "DOWN"))),
+                "flashalpha": fa_status,
                 "polygon_fallback_active": any(
                     (s or {}).get("_source") == "polygon_fallback"
                     for s in (bundle.get("snaps", {}).get("snapshots") or {}).values()
