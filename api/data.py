@@ -1347,8 +1347,20 @@ def _entry_check(grade, direction_bias, score_result, portfolio=None, now=None):
     """
     layers = score_result.get("layers", {})
 
-    if layers.get("risk", {}).get("passed") is False or grade == "LOCKED":
-        return False, "RISK_LOCKED"
+    # Grade=LOCKED은 여러 원인 — 가장 정확한 사유를 우선 반환.
+    if grade == "LOCKED":
+        macro = layers.get("macro_gate", {})
+        if not macro.get("gate_passed", True):
+            return False, f"MACRO_{macro.get('active_event','BLOCK')}"
+        risk = layers.get("risk", {})
+        if risk.get("passed") is False:
+            reason_text = (risk.get("lockout_reason") or "RISK").replace(" ", "_")[:60]
+            return False, f"RISK_{reason_text}"
+        # Runaway veto / signal-level lock — fall through to LOCKED_SIGNAL
+        return False, "SIGNAL_LOCKED_VETO_OR_OTHER"
+
+    if layers.get("risk", {}).get("passed") is False:
+        return False, "RISK_LOCKOUT"
 
     if grade != "STRONG":
         return False, f"GRADE_{grade or 'NONE'}_NOT_STRONG"
