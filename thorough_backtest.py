@@ -58,7 +58,7 @@ def download_daily_data(start_date: str, end_date: str) -> pd.DataFrame:
     print(f"Downloaded {len(df)} trading days.")
     return df
 
-def run_thorough_backtest(start_date="2022-05-01", end_date=None, initial_balance=2000.0):
+def run_thorough_backtest(start_date="2022-05-01", end_date=None, initial_balance=500000.0):
     if end_date is None:
         end_date = datetime.now().strftime("%Y-%m-%d")
 

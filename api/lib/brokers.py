@@ -272,7 +272,7 @@ class DryRunAdapter(BrokerAdapter):
                             "dryrun_orders.jsonl")
 
     def __init__(self):
-        self._equity = 10000.0
+        self._equity = 500000.0
         self._positions = []
 
     def is_ready(self):

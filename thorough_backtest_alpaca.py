@@ -35,7 +35,7 @@ if not APCA_API_KEY_ID or not APCA_API_SECRET_KEY:
 stock_client = StockHistoricalDataClient(APCA_API_KEY_ID, APCA_API_SECRET_KEY)
 
 # Backtest parameters (same spirit as live system)
-INITIAL_BALANCE = 2000.0
+INITIAL_BALANCE = 500000.0
 RISK_PER_TRADE_PCT = 1.5
 SPREAD_WIDTH = 5.0
 TP_PCT = 1.0  # 100% profit target
@@ -162,7 +162,7 @@ def prepare_daily_context(df_5min: pd.DataFrame, date: datetime) -> Dict:
     }
 
 
-def run_full_thorough_backtest(start_date: datetime, end_date: datetime, initial_balance: float = 2000.0):
+def run_full_thorough_backtest(start_date: datetime, end_date: datetime, initial_balance: float = 500000.0):
     """
     Thorough day-by-day backtest using real engine + Alpaca historical bars (supports 1Min/5Min).
     This is the proper version (not the simplified backtest.py).
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     parser.add_argument("--start", type=str, default=None, help="Start date YYYY-MM-DD (default: ~1 year ago)")
     parser.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD (default: today)")
     parser.add_argument("--timeframe", type=str, default="1Min", choices=["1Min", "5Min", "15Min"], help="Bar timeframe")
-    parser.add_argument("--balance", type=float, default=2000.0, help="Initial balance")
+    parser.add_argument("--balance", type=float, default=500000.0, help="Initial balance")
 
     args = parser.parse_args()
 

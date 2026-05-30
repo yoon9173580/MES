@@ -72,9 +72,9 @@ def replay_day(date_str: str, verbose: bool = True) -> dict:
 
     # Synthetic portfolio (clean state for replay)
     portfolio = {
-        "cash": 10000, "positions": {}, "history": [], "trade_log": [],
-        "initial_balance": 10000, "current_value": 10000,
-        "daily_start_value": 10000, "daily_session_date": date_str,
+        "cash": 500000, "positions": {}, "history": [], "trade_log": [],
+        "initial_balance": 500000, "current_value": 500000,
+        "daily_start_value": 500000, "daily_session_date": date_str,
     }
 
     # Iterate 5-min steps

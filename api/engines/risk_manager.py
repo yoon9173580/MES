@@ -62,8 +62,8 @@ def _calculate_daily_drawdown(portfolio: dict) -> float:
     set yet (first call ever on a new portfolio).
     """
     anchor = (portfolio.get("daily_start_value")
-              or portfolio.get("initial_balance", 10000.0)
-              or 10000.0)
+              or portfolio.get("initial_balance", 500000.0)
+              or 500000.0)
     current = portfolio.get("current_value", anchor)
     if anchor <= 0:
         return 0.0
@@ -90,7 +90,7 @@ def calculate_position_size(portfolio: dict, signal_grade: str, entry_price: flo
         sizing_reason   : str
     """
     cash = portfolio.get("cash", 0)
-    initial = portfolio.get("initial_balance", 10000.0)
+    initial = portfolio.get("initial_balance", 500000.0)
     
     # 1.5% risk rule (from Alpaca optimized backtest)
     RISK_PCT = 0.015

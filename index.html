@@ -1290,7 +1290,7 @@ function render(py) {
       const TARGET_MDD_PCT = 30;
       const TARGET_MAX_CONSEC_LOSS = 5;
 
-      const initialBal = pt.initial_balance || 10000;
+      const initialBal = pt.initial_balance || 500000;
       const tradeCount = totalTrades;
       const wr = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
       const pf = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? 99 : 0);
@@ -1423,7 +1423,7 @@ function render(py) {
       canvas.width = canvas.offsetWidth * 2;
       canvas.height = 96;
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      const pts = [pt.initial_balance || 10000];
+      const pts = [pt.initial_balance || 500000];
       sortedClosed.forEach(h => pts.push(pts[pts.length-1] + (h.realized_pnl||h.pnl||0)));
       const minV = Math.min(...pts), maxV = Math.max(...pts);
       const range = maxV - minV || 1;

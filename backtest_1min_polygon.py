@@ -58,7 +58,7 @@ ES_SLIP = 0.25        # 1 tick slippage per side
 ES_MARGIN = 50.0      # Day margin per contract
 ATR_SL_MULT = 1.5
 RISK_PCT = 0.12       # 12% Kelly risk per trade
-START_BAL = 10000.0
+START_BAL = 500000.0
 
 # Risk Limits
 MAX_DD_PCT = 6.0
