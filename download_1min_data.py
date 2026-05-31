@@ -25,8 +25,8 @@ if not API_KEY and os.path.exists(".env"):
                 API_KEY = line.split("=", 1)[1].strip()
 
 SYMBOL = "SPY"             # MES 선물은 "MES" 또는 "MESZ4" (만기별) 사용
-START_DATE = "2024-01-01"   # 시작일 (자유롭게 변경)
-END_DATE = "2026-05-23"     # 종료일
+START_DATE = "2021-01-01"   # 시작일 (Polygon Stocks Starter = 5yr lookback; free = 2yr, older chunks fail gracefully)
+END_DATE = "2026-05-31"     # 종료일 (today)
 TIMEFRAME = "1"             # 1 = 1분봉
 OUTPUT_CSV = f"{SYMBOL}_1min_data.csv"
 
