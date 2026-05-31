@@ -167,7 +167,7 @@ def main(csv_path: str, balance: float):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Walk-forward OOS backtest")
     parser.add_argument("--csv", type=str, default="MES_1min_data.csv")
-    parser.add_argument("--balance", type=float, default=10000.0)
+    parser.add_argument("--balance", type=float, default=500000.0)
     args = parser.parse_args()
 
     if not os.path.exists(args.csv):

@@ -31,24 +31,24 @@ NY = pytz.timezone("America/New_York")
 # ── Position Sizing ──────────────────────────────────────────────────
 class TestPositionSizing:
     def test_strong_signal_allocates_full(self):
-        portfolio = {"cash": 10000, "initial_balance": 10000}
+        portfolio = {"cash": 500000, "initial_balance": 500000}
         result = calculate_position_size(portfolio, "STRONG", entry_price=5800.0)
         assert result["allocation_pct"] == 100
         assert result["contracts"] >= 1
-        # max_risk_amount = 10000 * 0.015 = $150 at full allocation
-        assert result["max_risk_amount"] == 150.0
+        # max_risk_amount = 500000 * 0.015 = $7,500 at full allocation
+        assert result["max_risk_amount"] == 7500.0
         assert "STRONG" in result["sizing_reason"]
 
     def test_moderate_signal_allocates_half(self):
-        portfolio = {"cash": 10000, "initial_balance": 10000}
+        portfolio = {"cash": 500000, "initial_balance": 500000}
         result = calculate_position_size(portfolio, "MODERATE", entry_price=5800.0)
         assert result["allocation_pct"] == 50
-        # max_risk_amount = 10000 * 0.015 * 0.5 = $75
-        assert result["max_risk_amount"] == 75.0
+        # max_risk_amount = 500000 * 0.015 * 0.5 = $3,750
+        assert result["max_risk_amount"] == 3750.0
         assert "MODERATE" in result["sizing_reason"]
 
     def test_none_signal_zero_contracts(self):
-        portfolio = {"cash": 10000, "initial_balance": 10000}
+        portfolio = {"cash": 500000, "initial_balance": 500000}
         result = calculate_position_size(portfolio, "NONE", entry_price=5800.0)
         assert result["contracts"] == 0
         assert result["allocation_pct"] == 0
@@ -56,7 +56,7 @@ class TestPositionSizing:
 
     def test_insufficient_cash_caps_contracts(self):
         # $30 cash can't even buy 1 contract at $50 margin
-        portfolio = {"cash": 30, "initial_balance": 10000}
+        portfolio = {"cash": 30, "initial_balance": 500000}
         result = calculate_position_size(portfolio, "STRONG", entry_price=5800.0)
         # contracts_by_margin = int(30/50) = 0, but max(1, ...) ensures >=1
         # Yet 1 contract requires $50 margin — caller is responsible for blocking entry.
@@ -100,7 +100,7 @@ class TestConsecutiveLosses:
             {"pnl": -30, "pnl_locked": True},
             {"pnl": -40, "pnl_locked": True},
             {"pnl": -50, "pnl_locked": True},
-        ], "daily_start_value": 10000, "current_value": 10000}
+        ], "daily_start_value": 500000, "current_value": 500000}
         result = check_risk_rules(portfolio)
         assert result["lockout"] is True
         assert "3-STRIKE" in result["lockout_reason"]
@@ -136,8 +136,8 @@ class TestDailyTradeCount:
         today = datetime.now(NY).strftime("%Y-%m-%d")
         portfolio = {
             "trade_log": [{"event": "OPEN", "date": today}] * MAX_DAILY_TRADES,
-            "daily_start_value": 10000,
-            "current_value": 10000,
+            "daily_start_value": 500000,
+            "current_value": 500000,
         }
         result = check_risk_rules(portfolio)
         assert result["lockout"] is True
@@ -149,32 +149,32 @@ class TestDailyTradeCount:
 # ── Daily Drawdown ───────────────────────────────────────────────────
 class TestDailyDrawdown:
     def test_no_drawdown_when_balanced(self):
-        portfolio = {"daily_start_value": 10000, "current_value": 10000}
+        portfolio = {"daily_start_value": 500000, "current_value": 500000}
         assert _calculate_daily_drawdown(portfolio) == 0.0
 
     def test_calculates_percent_from_day_open_anchor(self):
-        portfolio = {"daily_start_value": 10000, "current_value": 9500}
+        portfolio = {"daily_start_value": 500000, "current_value": 475000}
         # 5% drawdown
         assert _calculate_daily_drawdown(portfolio) == pytest.approx(5.0, abs=0.01)
 
     def test_falls_back_to_initial_balance_if_no_anchor(self):
-        portfolio = {"initial_balance": 10000, "current_value": 9700}
+        portfolio = {"initial_balance": 500000, "current_value": 485000}
         assert _calculate_daily_drawdown(portfolio) == pytest.approx(3.0, abs=0.01)
 
     def test_default_anchor_500k_when_nothing_set(self):
         portfolio = {"current_value": 490000}
-        # falls back to default $500k (system was scaled from $10k to $500k)
+        # falls back to default $500k starting balance
         assert _calculate_daily_drawdown(portfolio) == pytest.approx(2.0, abs=0.01)
 
     def test_positive_pnl_returns_zero_not_negative(self):
         # Drawdown is always >= 0 (we don't have "negative drawdown")
-        portfolio = {"daily_start_value": 10000, "current_value": 10500}
+        portfolio = {"daily_start_value": 500000, "current_value": 525000}
         assert _calculate_daily_drawdown(portfolio) == 0.0
 
     def test_six_percent_drawdown_triggers_lockout(self):
         portfolio = {
-            "daily_start_value": 10000,
-            "current_value": 9400,  # exactly 6% down
+            "daily_start_value": 500000,
+            "current_value": 470000,  # exactly 6% down
         }
         result = check_risk_rules(portfolio)
         assert result["lockout"] is True
@@ -184,7 +184,7 @@ class TestDailyDrawdown:
 # ── Risk Rules — Return Shape ────────────────────────────────────────
 class TestRiskRulesShape:
     def test_returns_required_keys(self):
-        portfolio = {"daily_start_value": 10000, "current_value": 10000}
+        portfolio = {"daily_start_value": 500000, "current_value": 500000}
         result = check_risk_rules(portfolio)
         required = {
             "passed", "score", "max", "lockout", "lockout_reason",
@@ -196,12 +196,12 @@ class TestRiskRulesShape:
     def test_max_is_zero_to_exclude_from_active_sum(self):
         # Risk layer is a gate, not a score contributor — max must be 0 so
         # it doesn't inflate active_max in score_engine.
-        portfolio = {"daily_start_value": 10000, "current_value": 10000}
+        portfolio = {"daily_start_value": 500000, "current_value": 500000}
         result = check_risk_rules(portfolio)
         assert result["max"] == 0
 
     def test_clean_portfolio_passes_all_checks(self):
-        portfolio = {"daily_start_value": 10000, "current_value": 10000, "history": []}
+        portfolio = {"daily_start_value": 500000, "current_value": 500000, "history": []}
         result = check_risk_rules(portfolio)
         assert result["passed"] is True
         assert result["lockout"] is False
@@ -210,7 +210,7 @@ class TestRiskRulesShape:
 
     def test_strikes_remaining_decrements_with_losses(self):
         portfolio = {
-            "daily_start_value": 10000, "current_value": 10000,
+            "daily_start_value": 500000, "current_value": 500000,
             "history": [
                 {"pnl": -30, "pnl_locked": True},
                 {"pnl": -40, "pnl_locked": True},
@@ -222,7 +222,7 @@ class TestRiskRulesShape:
 
     def test_weekly_loss_limit(self):
         portfolio = {
-            "daily_start_value": 10000, "current_value": 10000,
+            "daily_start_value": 500000, "current_value": 500000,
             "total_return_pct": -MAX_WEEKLY_LOSS_PCT,
         }
         result = check_risk_rules(portfolio)

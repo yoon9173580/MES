@@ -175,7 +175,7 @@ def check_daily_bias(daily_ohlc, trading_days, idx, spy_open):
 
 def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                          end_str: str = "2026-03-25",
-                         start_balance: float = 10000.0):
+                         start_balance: float = 500000.0):
     t_start = time.time()
     print("=" * 80)
     print("  MICRO E-MINI (MES) - PRO TRADER STRATEGY INTEGRATION")
@@ -599,7 +599,7 @@ if __name__ == "__main__":
     parser.add_argument("--csv", type=str, default="C:/Users/Gun_y/Desktop/SPY_1min_data.csv")
     parser.add_argument("--start", type=str, default="2023-03-25")
     parser.add_argument("--end", type=str, default="2026-03-25")
-    parser.add_argument("--balance", type=float, default=10000.0)
+    parser.add_argument("--balance", type=float, default=500000.0)
 
     args = parser.parse_args()
 

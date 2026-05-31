@@ -74,7 +74,7 @@ BACKTEST_SUMMARY = {
         "status": "ACTUAL",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex)",
         "vs_prior_run": "Prior 'ACTUAL' values used ES mult/12% risk then /10 rescale — produced misleading 33.9% annual / 23.7% DD. Rerun with live MES@1.5% gives realistic 12.6% / 3.6% DD.",
-        "note": "Real Databento data + live params. $10k → $14,293 in 3yr. 60% WR, 2.58 PF, 1.72 R:R. MDD 3.6% means worst drawdown was a $360 loss on $10k. Conservative but compounds: $10k → ~$14k in 3yr."
+        "note": "Real Databento data + live params. $500k → ~$714k in 3yr (42.9% total / 12.6% CAGR). 60% WR, 2.58 PF, 1.72 R:R. MDD 3.6% ≈ $18k worst loss on $500k. Conservative but compounds."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
@@ -855,7 +855,7 @@ def _default_pf():
         "total_return_pct": 0.0,
         # Daily DD anchor — set to current_value at each session open so the
         # 6% halt limits a *single day's* loss, not cumulative drawdown from
-        # the original $10k starting balance.
+        # the original $500k starting balance.
         "daily_start_value": STARTING_BALANCE,
         "daily_session_date": None,
     }
@@ -868,7 +868,7 @@ def _normalize_pf(pf):
     # ── ES Futures Migration: reset old options-era portfolios ──
     old_bal = base.get("initial_balance", 0)
     if old_bal < STARTING_BALANCE and old_bal > 0:
-        # Old options portfolio ($500) → reset to ES futures ($10,000)
+        # Any sub-$500k portfolio (options-era $500 or earlier $10k) → reset to current $500k.
         base = _default_pf()
         base["_migrated_from_options"] = True
     base["positions"] = base.get("positions") or {}

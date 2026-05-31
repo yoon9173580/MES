@@ -240,7 +240,7 @@ def main_loop():
                         # MES front-month contract code, 1.5% account risk → ~1-3 contracts
                         from lib.futures_meta import current_mes_contract
                         symbol = current_mes_contract(now)
-                        equity = get_account_equity() or 10000.0
+                        equity = get_account_equity() or 500000.0
                         risk_amount = equity * 0.015
                         risk_per_contract = abs(spy_price - sl) * 5.0 + 0.50  # $5/pt + commission
                         qty = max(1, int(risk_amount / risk_per_contract))
