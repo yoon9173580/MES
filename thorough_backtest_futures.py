@@ -14,9 +14,9 @@ Integrated Strategies (from top futures traders):
 Optimal Configuration (Aggressive Optimizer - 170+ combinations tested):
   - Entry: 10:30 AM | Exit: 15:30 PM
   - SL = 1.5x ATR(14) dynamic (adapts to volatility)
-  - MIN_SCORE = 90 + NR7/Pullback bonuses
-  - Risk = 10% per trade (Kelly-informed, well below optimal 26%)
-  - Margin = $500/contract (discount broker ES day-trading margin)
+  - MIN_SCORE = 82 (freq-tune v2; was 88) + MODERATE 75-87 at 50% size
+  - Risk = 1.5% per trade (Kelly-informed; matches api/data.py RISK_PCT)
+  - Margin = $50/MES contract (live day-trading margin)
 
 Product: Micro E-mini S&P 500 (MES)
   - 1 ES contract = $50 per point of S&P 500
@@ -51,7 +51,12 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters (matches api/data.py live RISK_PCT) --
-MIN_SCORE = 88              # Slightly relaxed for more trades (88 vs 90)
+# Frequency tuning v2 — mirrors the IC freq-tune precedent (commit 4f56377):
+# IC went score90 STRONG → score85 MODERATE: trade count 72 → 132 (2x), PF 6.91 → 7.01 (HELD).
+# Same pattern applied here: MIN_SCORE 88→82, MODERATE allowed at 50% size.
+MIN_SCORE = 82              # Was 88. Allows MODERATE 75-87 band to qualify (at half size).
+MIN_GRADE = "MODERATE"      # Was effectively STRONG-only. MODERATE entries get 50% contracts.
+MODERATE_SIZE_MULT = 0.5    # Half size for MODERATE (matches risk_manager.calculate_position_size).
 RISK_PCT = 0.015            # 1.5% per-trade risk (live system value)
 MARGIN_UTIL = 0.95          # 95% margin utilization allowed
 EXIT_TIME = dtime(15, 30)   # Exit at 15:30 (avoid last 30min noise)
@@ -356,9 +361,16 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
            (spy_ret < -SECTOR_THRESHOLD and qqq_ret < -SECTOR_THRESHOLD and iwm_ret < -SECTOR_THRESHOLD):
             is_runaway_trend = True
 
-        # Entry filter — accept both legacy CALL/PUT and new LONG/SHORT bias outputs
-        grade = "STRONG" if boosted_score >= MIN_SCORE else "MODERATE" if boosted_score >= 75 else "WEAK"
-        if boosted_score < MIN_SCORE or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
+        # Entry filter — accept both legacy CALL/PUT and new LONG/SHORT bias outputs.
+        # Grade derivation: STRONG ≥ 88 (legacy STRONG floor), MODERATE 75..87, else WEAK.
+        # Entry gate now passes MODERATE too (post freq-tune); MIN_SCORE=82 is the hard score floor.
+        if boosted_score >= 88:
+            grade = "STRONG"
+        elif boosted_score >= 75:
+            grade = "MODERATE"
+        else:
+            grade = "WEAK"
+        if boosted_score < MIN_SCORE or grade == "WEAK" or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
             continue
 
         # Normalize to LONG/SHORT internally
@@ -390,6 +402,9 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         if max_by_margin == 0:
             max_by_margin = 1
         num_contracts = min(num_contracts, max_by_margin)
+        # MODERATE entries take half size (mirrors live PERMISSIVE mode).
+        if grade == "MODERATE":
+            num_contracts = max(1, int(num_contracts * MODERATE_SIZE_MULT))
         if num_contracts * ES_DAY_MARGIN > balance:
             continue
 
@@ -494,6 +509,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
             "score": normalized,
             "boosted_score": boosted_score,
             "boost_reasons": ",".join(boost_reasons) if boost_reasons else "",
+            "grade": grade,
             "direction": trade_dir,
             "strategy": strategy_used,
             "entry_price": round(entry_price, 2),
