@@ -11,12 +11,12 @@ Integrated Strategies (from top futures traders):
   - ATR-Based Dynamic SL (1.5x ATR, adapts to volatility)
   - Kelly-Informed Position Sizing (10% risk, margin-aware)
 
-Optimal Configuration (Aggressive Optimizer - 170+ combinations tested):
-  - Entry: 10:30 AM | Exit: 15:30 PM
-  - SL = 1.5x ATR(14) dynamic (adapts to volatility)
-  - MIN_SCORE = 90 + NR7/Pullback bonuses
-  - Risk = 10% per trade (Kelly-informed, well below optimal 26%)
-  - Margin = $500/contract (discount broker ES day-trading margin)
+v5 Configuration (High-Frequency Dual-Window):
+  - Entry: PRIME 10:30 AM + GAMMA 14:00 PM | Exit: 15:30 PM
+  - SL = 1.5x ATR PRIME / 1.125x ATR GAMMA (tighter for 90-min window)
+  - MIN_SCORE = 78 (MODERATE grade; STRONG = 88+)
+  - Risk = 1.5% per trade | LockoutStrikes=3 | LockoutDays=1
+  - Margin = $50/contract (MES day-trading margin)
 
 Product: Micro E-mini S&P 500 (MES)
   - 1 ES contract = $50 per point of S&P 500
@@ -51,7 +51,7 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters (matches api/data.py live RISK_PCT) --
-MIN_SCORE = 88              # Slightly relaxed for more trades (88 vs 90)
+MIN_SCORE = 78              # MODERATE grade threshold (was 88 — STRONG only)
 RISK_PCT = 0.015            # 1.5% per-trade risk (live system value)
 MARGIN_UTIL = 0.95          # 95% margin utilization allowed
 EXIT_TIME = dtime(15, 30)   # Exit at 15:30 (avoid last 30min noise)
@@ -60,12 +60,16 @@ ADX_RUNAWAY = 40.0           # ADX runaway veto
 RSI_UPPER = 90.0             # RSI upper veto
 RSI_LOWER = 10.0             # RSI lower veto
 SECTOR_THRESHOLD = 1.8       # Sector breakout veto
-LOCKOUT_STRIKES = 2          # Consecutive losses before lockout
-LOCKOUT_DAYS = 3             # Days to cool down
+LOCKOUT_STRIKES = 3          # Consecutive losses before lockout (was 2)
+LOCKOUT_DAYS = 1             # Days to cool down (was 3)
 ATR_SL_MULT = 1.5            # SL = 1.5x ATR(14) dynamic
 TRAILING_ACTIVATION = 1.0    # Activate trailing stop after 1.0x ATR profit
 TRAILING_STEP = 0.5          # Trail by 0.5x ATR behind highest profit
 BREAKEVEN_AT = 0.5           # Move SL to breakeven after 0.5x ATR profit
+
+# -- Dual Entry Windows --
+ENTRY_WINDOWS = [dtime(10, 30), dtime(14, 0)]   # PRIME (10:30) + GAMMA (14:00)
+MAX_TRADES_PER_DAY = 2       # Max positions per calendar day
 
 # -- Pro Strategy Bonuses --
 NR7_SCORE_BOOST = 5          # Score boost on NR7 days (Crabel)
@@ -286,242 +290,250 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 elif gap_pct < -0.1:
                     gap_bias = 1   # Small gap down: bullish
 
-        # ===== Score Engine at 10:30 AM =====
-        entry_time = dtime(10, 30)
-        entry_bar = None
-        for ts, o, h, l, c, v in day_bars:
-            if ts.time() >= entry_time:
-                entry_bar = (ts, o, h, l, c, v)
+        # ===== Dual Entry Windows: PRIME (10:30) + GAMMA (14:00) =====
+        trades_today = 0
+        for entry_time in ENTRY_WINDOWS:
+            if trades_today >= MAX_TRADES_PER_DAY:
                 break
-        if not entry_bar:
-            continue
 
-        ts_entry, spy_entry_price, _, _, _, _ = entry_bar
+            is_gamma = (entry_time == dtime(14, 0))
 
-        # Slice morning bars
-        df_morning = df_day[df_day.index.time <= entry_time].copy()
-        if len(df_morning) < 5:
-            continue
-        df_morning.columns = [col.capitalize() for col in df_morning.columns]
-
-        # Sector returns
-        spy_morning_ret = ((spy_entry_price / spy_o) - 1.0) * 100
-        pcts = {
-            "SPY": spy_morning_ret,
-            "QQQ": spy_morning_ret * 1.2 if spy_morning_ret >= 0 else spy_morning_ret * 1.3,
-            "IWM": spy_morning_ret * 0.9,
-            "DIA": spy_morning_ret * 0.8
-        }
-
-        # Morning metrics
-        vwap_morning = (df_morning["High"] * df_morning["Volume"]).sum() / df_morning["Volume"].sum() if df_morning["Volume"].sum() > 0 else spy_entry_price
-        range_morning = float(df_morning["High"].max() - df_morning["Low"].min())
-        avg_5min_vol = df_morning["Volume"].tail(5).mean()
-        avg_morning_vol = df_morning["Volume"].mean()
-        vol_ratio = avg_5min_vol / avg_morning_vol if avg_morning_vol > 0 else 1.0
-
-        # Score Engine
-        try:
-            regime = calculate_regime_score(
-                vix_price=vix_val, vix3m_price=vix_val * 1.08,
-                spy_price=spy_entry_price, prev_close=spy_o, spy_history=df_morning)
-            corr = calculate_correlation_score(pcts)
-            time_win = calculate_time_score(ts_entry)
-            tech = calculate_technical_score(spy_entry_price, vwap_morning, vol_ratio, range_morning, df_morning)
-
-            active_scores = [regime["score"], corr["score"], time_win["score"], tech["score"]]
-            active_max = regime["max"] + corr["max"] + time_win["max"] + tech["max"]
-            normalized = int((sum(active_scores) / active_max) * 100) if active_max > 0 else 0
-            direction = tech.get("direction_bias", "NEUTRAL")
-        except Exception:
-            continue
-
-        # ===== PRO STRATEGY: Score Boosting =====
-        boosted_score = normalized
-        boost_reasons = []
-
-        if is_nr7:
-            boosted_score += NR7_SCORE_BOOST
-            boost_reasons.append("NR7")
-
-        if is_pullback and direction == "CALL":
-            boosted_score += PULLBACK_SCORE_BOOST
-            boost_reasons.append("3DAY_PB")
-
-        # -- Runaway Trend Veto --
-        is_runaway_trend = False
-        adx_val = regime.get("details", {}).get("adx", {}).get("value")
-        if adx_val is not None and adx_val >= ADX_RUNAWAY:
-            is_runaway_trend = True
-        rsi_val = tech.get("rsi")
-        if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
-            is_runaway_trend = True
-        spy_ret, qqq_ret, iwm_ret = pcts.get("SPY", 0), pcts.get("QQQ", 0), pcts.get("IWM", 0)
-        if (spy_ret > SECTOR_THRESHOLD and qqq_ret > SECTOR_THRESHOLD and iwm_ret > SECTOR_THRESHOLD) or \
-           (spy_ret < -SECTOR_THRESHOLD and qqq_ret < -SECTOR_THRESHOLD and iwm_ret < -SECTOR_THRESHOLD):
-            is_runaway_trend = True
-
-        # Entry filter — accept both legacy CALL/PUT and new LONG/SHORT bias outputs
-        grade = "STRONG" if boosted_score >= MIN_SCORE else "MODERATE" if boosted_score >= 75 else "WEAK"
-        if boosted_score < MIN_SCORE or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
-            continue
-
-        # Normalize to LONG/SHORT internally
-        is_bull_signal = direction in ("CALL", "LONG")
-        is_bear_signal = direction in ("PUT", "SHORT")
-
-        # Daily Bias Filter: skip SHORT in bullish daily trend (low VIX)
-        if daily_trend_long and is_bear_signal and vix_val < VIX_THRESHOLD:
-            continue
-
-        # -- Adaptive Strategy Switching --
-        is_trending = (vix_val < VIX_THRESHOLD)
-        if is_trending:
-            trade_dir = "LONG" if is_bull_signal else "SHORT"
-            strategy_used = "TREND_FOLLOW"
-        else:
-            trade_dir = "SHORT" if is_bull_signal else "LONG"
-            strategy_used = "MEAN_REVERSION"
-
-        # -- Kelly-Informed Position Sizing --
-        max_risk_dollar = balance * RISK_PCT
-        risk_per_contract = (sl_points + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
-        num_contracts = int(max_risk_dollar / risk_per_contract)
-        if num_contracts == 0:
-            num_contracts = 1
-
-        # Margin check
-        max_by_margin = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
-        if max_by_margin == 0:
-            max_by_margin = 1
-        num_contracts = min(num_contracts, max_by_margin)
-        if num_contracts * ES_DAY_MARGIN > balance:
-            continue
-
-        # -- Minute-by-Minute Price Simulation with Trailing Stop --
-        entry_price = spy_entry_price
-        sl_target = entry_price - sl_points if trade_dir == "LONG" else entry_price + sl_points
-        breakeven_activated = False
-        trailing_activated = False
-        best_price = entry_price  # Track best favorable price
-
-        exit_price = None
-        exit_type = "EOD"
-        exit_time_str = f"{EXIT_TIME.hour}:{EXIT_TIME.minute:02d}"
-
-        for ts_bar, o_bar, h_bar, l_bar, c_bar, v_bar in day_bars:
-            if ts_bar.time() <= entry_time:
+            # Find entry bar for this window
+            entry_bar = None
+            for ts, o, h, l, c, v in day_bars:
+                if ts.time() >= entry_time:
+                    entry_bar = (ts, o, h, l, c, v)
+                    break
+            if not entry_bar:
                 continue
-            if ts_bar.time() > EXIT_TIME:
-                break
 
-            # Track best price for trailing stop
-            if trade_dir == "LONG":
-                if h_bar > best_price:
-                    best_price = h_bar
-                current_profit_pts = best_price - entry_price
+            ts_entry, spy_entry_price, _, _, _, _ = entry_bar
 
-                # Breakeven stop: move SL to entry after 0.5x ATR profit
-                if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
-                    sl_target = entry_price + ES_SLIPPAGE_PTS  # Breakeven + cover slippage
-                    breakeven_activated = True
+            # Tighter SL for GAMMA (only ~90 min until EOD exit)
+            gamma_mult = 0.75 if is_gamma else 1.0
+            sl_cap = 10.0 if is_gamma else 15.0
+            window_sl = max(ATR_SL_MULT * gamma_mult * atr_val, 2.0)
+            window_sl = min(window_sl, sl_cap)
 
-                # Trailing stop: activate after 1.0x ATR profit, trail 0.5x ATR behind peak
-                if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
-                    trailing_sl = best_price - TRAILING_STEP * atr_val
-                    if trailing_sl > sl_target:
-                        sl_target = trailing_sl
-                        trailing_activated = True
+            # Slice bars up to entry time for scoring
+            df_morning = df_day[df_day.index.time <= entry_time].copy()
+            if len(df_morning) < 5:
+                continue
+            df_morning.columns = [col.capitalize() for col in df_morning.columns]
 
-                # Check SL hit
-                if l_bar <= sl_target:
-                    exit_price = sl_target
-                    exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
-                    exit_time_str = ts_bar.strftime("%H:%M")
-                    break
-            else:  # SHORT
-                if l_bar < best_price:
-                    best_price = l_bar
-                current_profit_pts = entry_price - best_price
+            # Sector returns (relative to day open)
+            spy_morning_ret = ((spy_entry_price / spy_o) - 1.0) * 100
+            pcts = {
+                "SPY": spy_morning_ret,
+                "QQQ": spy_morning_ret * 1.2 if spy_morning_ret >= 0 else spy_morning_ret * 1.3,
+                "IWM": spy_morning_ret * 0.9,
+                "DIA": spy_morning_ret * 0.8
+            }
 
-                # Breakeven stop
-                if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
-                    sl_target = entry_price - ES_SLIPPAGE_PTS
-                    breakeven_activated = True
+            # Window metrics
+            vwap_morning = (df_morning["High"] * df_morning["Volume"]).sum() / df_morning["Volume"].sum() if df_morning["Volume"].sum() > 0 else spy_entry_price
+            range_morning = float(df_morning["High"].max() - df_morning["Low"].min())
+            avg_5min_vol = df_morning["Volume"].tail(5).mean()
+            avg_morning_vol = df_morning["Volume"].mean()
+            vol_ratio = avg_5min_vol / avg_morning_vol if avg_morning_vol > 0 else 1.0
 
-                # Trailing stop
-                if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
-                    trailing_sl = best_price + TRAILING_STEP * atr_val
-                    if trailing_sl < sl_target:
-                        sl_target = trailing_sl
-                        trailing_activated = True
+            # Score Engine
+            try:
+                regime = calculate_regime_score(
+                    vix_price=vix_val, vix3m_price=vix_val * 1.08,
+                    spy_price=spy_entry_price, prev_close=spy_o, spy_history=df_morning)
+                corr = calculate_correlation_score(pcts)
+                time_win = calculate_time_score(ts_entry)
+                tech = calculate_technical_score(spy_entry_price, vwap_morning, vol_ratio, range_morning, df_morning)
 
-                # Check SL hit
-                if h_bar >= sl_target:
-                    exit_price = sl_target
-                    exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
-                    exit_time_str = ts_bar.strftime("%H:%M")
-                    break
+                active_scores = [regime["score"], corr["score"], time_win["score"], tech["score"]]
+                active_max = regime["max"] + corr["max"] + time_win["max"] + tech["max"]
+                normalized = int((sum(active_scores) / active_max) * 100) if active_max > 0 else 0
+                direction = tech.get("direction_bias", "NEUTRAL")
+            except Exception:
+                continue
 
-        # Exit at EXIT_TIME fallback
-        if exit_price is None:
-            eod_price = None
-            for bar_ts, bar_o, bar_h, bar_l, bar_c, bar_v in reversed(day_bars):
-                if bar_ts.time() <= EXIT_TIME:
-                    eod_price = bar_c; break
-            if eod_price is None:
-                eod_price = float(df_day["Close"].iloc[-1])
-            exit_price = eod_price
+            # Score Boosting
+            boosted_score = normalized
+            boost_reasons = []
+            if is_nr7:
+                boosted_score += NR7_SCORE_BOOST
+                boost_reasons.append("NR7")
+            if is_pullback and direction == "CALL":
+                boosted_score += PULLBACK_SCORE_BOOST
+                boost_reasons.append("3DAY_PB")
+
+            # Runaway Trend Veto
+            is_runaway_trend = False
+            adx_val = regime.get("details", {}).get("adx", {}).get("value")
+            if adx_val is not None and adx_val >= ADX_RUNAWAY:
+                is_runaway_trend = True
+            rsi_val = tech.get("rsi")
+            if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
+                is_runaway_trend = True
+            spy_ret, qqq_ret, iwm_ret = pcts.get("SPY", 0), pcts.get("QQQ", 0), pcts.get("IWM", 0)
+            if (spy_ret > SECTOR_THRESHOLD and qqq_ret > SECTOR_THRESHOLD and iwm_ret > SECTOR_THRESHOLD) or \
+               (spy_ret < -SECTOR_THRESHOLD and qqq_ret < -SECTOR_THRESHOLD and iwm_ret < -SECTOR_THRESHOLD):
+                is_runaway_trend = True
+
+            # Entry filter
+            grade = "STRONG" if boosted_score >= 88 else "MODERATE" if boosted_score >= MIN_SCORE else "WEAK"
+            if boosted_score < MIN_SCORE or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
+                continue
+
+            # Normalize to LONG/SHORT
+            is_bull_signal = direction in ("CALL", "LONG")
+            is_bear_signal = direction in ("PUT", "SHORT")
+
+            # Daily Bias Filter: skip SHORT in bullish daily trend (low VIX)
+            if daily_trend_long and is_bear_signal and vix_val < VIX_THRESHOLD:
+                continue
+
+            # Adaptive Strategy Switching
+            is_trending = (vix_val < VIX_THRESHOLD)
+            if is_trending:
+                trade_dir = "LONG" if is_bull_signal else "SHORT"
+                strategy_used = "TREND_FOLLOW"
+            else:
+                trade_dir = "SHORT" if is_bull_signal else "LONG"
+                strategy_used = "MEAN_REVERSION"
+
+            # Kelly-Informed Position Sizing
+            max_risk_dollar = balance * RISK_PCT
+            risk_per_contract = (window_sl + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
+            num_contracts = int(max_risk_dollar / risk_per_contract)
+            if num_contracts == 0:
+                num_contracts = 1
+
+            # Margin check
+            max_by_margin = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
+            if max_by_margin == 0:
+                max_by_margin = 1
+            num_contracts = min(num_contracts, max_by_margin)
+            if num_contracts * ES_DAY_MARGIN > balance:
+                continue
+
+            # Minute-by-Minute Simulation
+            entry_price = spy_entry_price
+            sl_target = entry_price - window_sl if trade_dir == "LONG" else entry_price + window_sl
+            breakeven_activated = False
+            trailing_activated = False
+            best_price = entry_price
+
+            exit_price = None
             exit_type = "EOD"
+            exit_time_str = f"{EXIT_TIME.hour}:{EXIT_TIME.minute:02d}"
 
-        # -- P&L Calculation --
-        point_pnl = (exit_price - entry_price) if trade_dir == "LONG" else (entry_price - exit_price)
-        net_point_pnl = point_pnl - (ES_SLIPPAGE_PTS * 2)
-        gross_pnl = net_point_pnl * ES_MULTIPLIER * num_contracts
-        total_pnl = gross_pnl - (ES_COMMISSION_RT * num_contracts)
+            for ts_bar, o_bar, h_bar, l_bar, c_bar, v_bar in day_bars:
+                if ts_bar.time() <= entry_time:
+                    continue
+                if ts_bar.time() > EXIT_TIME:
+                    break
 
-        balance += total_pnl
-        if total_pnl > 0:
-            wins += 1
-            consecutive_wins += 1
-            consecutive_losses = 0
-            max_consec_wins = max(max_consec_wins, consecutive_wins)
-        else:
-            losses += 1
-            consecutive_losses += 1
-            consecutive_wins = 0
-            max_consec_losses = max(max_consec_losses, consecutive_losses)
-            if consecutive_losses >= LOCKOUT_STRIKES:
-                lockout_cooldown = LOCKOUT_DAYS
+                if trade_dir == "LONG":
+                    if h_bar > best_price:
+                        best_price = h_bar
+                    current_profit_pts = best_price - entry_price
+
+                    if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
+                        sl_target = entry_price + ES_SLIPPAGE_PTS
+                        breakeven_activated = True
+
+                    if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
+                        trailing_sl = best_price - TRAILING_STEP * atr_val
+                        if trailing_sl > sl_target:
+                            sl_target = trailing_sl
+                            trailing_activated = True
+
+                    if l_bar <= sl_target:
+                        exit_price = sl_target
+                        exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
+                        exit_time_str = ts_bar.strftime("%H:%M")
+                        break
+                else:  # SHORT
+                    if l_bar < best_price:
+                        best_price = l_bar
+                    current_profit_pts = entry_price - best_price
+
+                    if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
+                        sl_target = entry_price - ES_SLIPPAGE_PTS
+                        breakeven_activated = True
+
+                    if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
+                        trailing_sl = best_price + TRAILING_STEP * atr_val
+                        if trailing_sl < sl_target:
+                            sl_target = trailing_sl
+                            trailing_activated = True
+
+                    if h_bar >= sl_target:
+                        exit_price = sl_target
+                        exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
+                        exit_time_str = ts_bar.strftime("%H:%M")
+                        break
+
+            # EOD fallback exit
+            if exit_price is None:
+                eod_price = None
+                for bar_ts, bar_o, bar_h, bar_l, bar_c, bar_v in reversed(day_bars):
+                    if bar_ts.time() <= EXIT_TIME:
+                        eod_price = bar_c; break
+                if eod_price is None:
+                    eod_price = float(df_day["Close"].iloc[-1])
+                exit_price = eod_price
+                exit_type = "EOD"
+
+            # P&L Calculation
+            point_pnl = (exit_price - entry_price) if trade_dir == "LONG" else (entry_price - exit_price)
+            net_point_pnl = point_pnl - (ES_SLIPPAGE_PTS * 2)
+            gross_pnl = net_point_pnl * ES_MULTIPLIER * num_contracts
+            total_pnl = gross_pnl - (ES_COMMISSION_RT * num_contracts)
+
+            balance += total_pnl
+            if total_pnl > 0:
+                wins += 1
+                consecutive_wins += 1
                 consecutive_losses = 0
-            prev_balance = balance - total_pnl
-            if prev_balance > 0 and abs(total_pnl) / prev_balance >= 0.06:
-                lockout_cooldown = LOCKOUT_DAYS
+                max_consec_wins = max(max_consec_wins, consecutive_wins)
+            else:
+                losses += 1
+                consecutive_losses += 1
+                consecutive_wins = 0
+                max_consec_losses = max(max_consec_losses, consecutive_losses)
+                if consecutive_losses >= LOCKOUT_STRIKES:
+                    lockout_cooldown = LOCKOUT_DAYS
+                    consecutive_losses = 0
+                prev_balance = balance - total_pnl
+                if prev_balance > 0 and abs(total_pnl) / prev_balance >= 0.06:
+                    lockout_cooldown = LOCKOUT_DAYS
 
-        # Monthly tracking
-        month_key = day_str[:7]  # "YYYY-MM"
-        monthly_pnl[month_key] = monthly_pnl.get(month_key, 0) + total_pnl
-        daily_balance[day_str] = round(balance, 2)
+            # Monthly tracking
+            month_key = day_str[:7]
+            monthly_pnl[month_key] = monthly_pnl.get(month_key, 0) + total_pnl
+            daily_balance[day_str] = round(balance, 2)
 
-        trades.append({
-            "date": day_str,
-            "score": normalized,
-            "boosted_score": boosted_score,
-            "boost_reasons": ",".join(boost_reasons) if boost_reasons else "",
-            "direction": trade_dir,
-            "strategy": strategy_used,
-            "entry_price": round(entry_price, 2),
-            "exit_price": round(exit_price, 2),
-            "exit_type": exit_type,
-            "exit_time": exit_time_str,
-            "sl_points": round(sl_points, 2),
-            "atr": round(atr_val, 2),
-            "point_pnl": round(point_pnl, 2),
-            "contracts": num_contracts,
-            "pnl": round(total_pnl, 2),
-            "balance": round(balance, 2),
-            "vix": round(vix_val, 1)
-        })
+            trades.append({
+                "date": day_str,
+                "window": "GAMMA" if is_gamma else "PRIME",
+                "grade": grade,
+                "score": normalized,
+                "boosted_score": boosted_score,
+                "boost_reasons": ",".join(boost_reasons) if boost_reasons else "",
+                "direction": trade_dir,
+                "strategy": strategy_used,
+                "entry_price": round(entry_price, 2),
+                "exit_price": round(exit_price, 2),
+                "exit_type": exit_type,
+                "exit_time": exit_time_str,
+                "sl_points": round(window_sl, 2),
+                "atr": round(atr_val, 2),
+                "point_pnl": round(point_pnl, 2),
+                "contracts": num_contracts,
+                "pnl": round(total_pnl, 2),
+                "balance": round(balance, 2),
+                "vix": round(vix_val, 1)
+            })
+
+            trades_today += 1
 
         pbar.set_postfix({"Bal": f"${balance:,.0f}", "WR": f"{wins/(wins+losses)*100 if wins+losses>0 else 0:.0f}%"})
 
@@ -613,9 +625,16 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     print("\n" + "=" * 80)
     print("  MICRO E-MINI (MES) - PRO STRATEGY v4 RESULTS")
     print("=" * 80)
+    prime_cnt = sum(1 for t in trades if t.get("window") == "PRIME")
+    gamma_cnt = sum(1 for t in trades if t.get("window") == "GAMMA")
+    strong_cnt = sum(1 for t in trades if t.get("grade") == "STRONG")
+    moderate_cnt = sum(1 for t in trades if t.get("grade") == "MODERATE")
+
     print(f"  Period:            {start_str} ~ {end_str}  ({years:.1f}y)")
     print(f"  Product:           Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]")
     print(f"  Strategy:          ATR SL={ATR_SL_MULT}x + Trail + BE | Risk={RISK_PCT*100:.1f}%")
+    print(f"  Entry Windows:     PRIME(10:30)={prime_cnt} | GAMMA(14:00)={gamma_cnt}")
+    print(f"  Grade Breakdown:   STRONG(≥88)={strong_cnt} | MODERATE(≥{MIN_SCORE})={moderate_cnt}")
     print(f"  Pro Filters:       NR7 + 3Day Pullback + Gap + Daily Bias")
     print(f"  Starting Balance:  ${start_balance:,.2f}")
     print(f"  Final Balance:     ${balance:,.2f}")
@@ -652,10 +671,14 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     print("=" * 80)
 
     results = {
-        "model": "MES Futures Pro Strategy v4 (ATR+NR7+Pullback+Kelly, live params)",
+        "model": "MES Futures Pro Strategy v5 (Dual-Window, MODERATE grade, live params)",
         "period": f"{start_str} ~ {end_str}",
         "product": f"Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]",
-        "strategy": f"ATR SL={ATR_SL_MULT}x + 15:30 Exit | Risk={RISK_PCT*100:.1f}%",
+        "strategy": f"ATR SL={ATR_SL_MULT}x + PRIME/GAMMA | MinScore={MIN_SCORE} | Risk={RISK_PCT*100:.1f}%",
+        "prime_trades": prime_cnt,
+        "gamma_trades": gamma_cnt,
+        "strong_trades": strong_cnt,
+        "moderate_trades": moderate_cnt,
         "start_balance": start_balance,
         "end_balance": round(balance, 2),
         "total_pnl": round(total_pnl, 2),
