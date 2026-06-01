@@ -20,6 +20,8 @@ SPY_1min_data.csv
 MES_1min_data_et_rth.csv
 backtest_v4.json
 backtest_futures.json
+backtest_v4_real.json
+backtest_v9_real.json
 
 # Environments
 .venv/

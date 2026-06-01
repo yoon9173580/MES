@@ -358,7 +358,8 @@ class WalkForwardML:
 def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                          end_str: str = "2026-03-25",
                          start_balance: float = 10000.0,
-                         fixed_size: bool = False):
+                         fixed_size: bool = False,
+                         out_path: str = "backtest_futures.json"):
     t_start = time.time()
     # Pre-compute fixed contracts using start_balance (no reinvestment)
     _fixed_sl_ref = 15.0  # reference SL for fixed sizing (PRIME cap)
@@ -967,7 +968,6 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         "trades": trades,
     }
 
-    out_path = "backtest_futures.json"
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"[*] Saved results to {out_path}")
@@ -983,8 +983,22 @@ if __name__ == "__main__":
     parser.add_argument("--balance", type=float, default=10000.0)
     parser.add_argument("--fixed-size", action="store_true",
                         help="Use fixed contract count (no reinvestment effect)")
+    parser.add_argument("--profile", type=str, default="v9", choices=["v9", "v4"],
+                        help="v9 = wide PRIME+REENTRY+GAMMA windows (default); "
+                             "v4 = narrow single 10:30 PRIME window, quality-over-quantity")
+    parser.add_argument("--out", type=str, default="backtest_futures.json",
+                        help="Output JSON path")
 
     args = parser.parse_args()
+
+    # ── v4 profile override (narrow window, quality-over-quantity) ──
+    if args.profile == "v4":
+        ENTRY_WINDOWS = [dtime(10, 30)]   # single PRIME entry only
+        MAX_TRADES_PER_DAY = 1            # one high-conviction trade per day
+        LOCKOUT_STRIKES = 3               # stricter 3-strike lockout
+        LOCKOUT_DAYS = 1                  # 1-day cooldown after lockout
+        WalkForwardML.SKIP_THRESH = 0.43  # stricter ML gate (v4 default)
+        print("[*] PROFILE: v4 — narrow 10:30 PRIME only, max 1 trade/day, 3-strike lockout, ML skip<0.43")
 
     if not os.path.exists(args.csv):
         print(f"ERROR: Could not find CSV file at {args.csv}")
@@ -996,4 +1010,5 @@ if __name__ == "__main__":
         end_str=args.end,
         start_balance=args.balance,
         fixed_size=args.fixed_size,
+        out_path=args.out,
     )
