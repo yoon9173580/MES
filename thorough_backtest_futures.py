@@ -81,12 +81,13 @@ TRAILING_ACTIVATION = 0.5
 TRAILING_STEP = 0.25
 BREAKEVEN_AT = 0.25
 
-# -- Entry Windows: full PRIME scan (10:30~11:15) + GAMMA scan (14:00~14:30) --
+# -- Entry Windows: PRIME (10:30~11:30) + REENTRY (13:00~13:30) + GAMMA (14:00~14:45) --
 ENTRY_WINDOWS = [
-    dtime(10, 30), dtime(10, 45), dtime(11, 0), dtime(11, 15),  # PRIME (20pts)
-    dtime(14, 0),  dtime(14, 15), dtime(14, 30),                 # GAMMA (15pts)
+    dtime(10, 30), dtime(10, 45), dtime(11, 0), dtime(11, 15), dtime(11, 30),  # PRIME (20pts)
+    dtime(13, 0),  dtime(13, 30),                                              # REENTRY (afternoon)
+    dtime(14, 0),  dtime(14, 15), dtime(14, 30), dtime(14, 45),                # GAMMA (15pts)
 ]
-MAX_TRADES_PER_DAY = 3       # Up to 3 positions per day (2 PRIME + 1 GAMMA)
+MAX_TRADES_PER_DAY = 4       # Up to 4 positions per day (PRIME + REENTRY + GAMMA)
 
 # -- Pro Strategy Bonuses --
 NR7_SCORE_BOOST = 5          # Score boost on NR7 days (Crabel)
@@ -207,7 +208,7 @@ class WalkForwardML:
     """
     MIN_TRAIN    = 15
     SKIP_AFTER_N = 25    # start hard-filtering after 25 completed trades
-    SKIP_THRESH  = 0.43  # skip if confidence < this threshold
+    SKIP_THRESH  = 0.35  # skip if confidence < this threshold (loosened from 0.43 for more trades)
     RETRAIN_N    = 5
     SIZE_HIGH  = 0.62   # +30%
     SIZE_MED   = 0.55   # +15%
@@ -490,7 +491,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
             if entry_time <= last_exit_time_today:
                 continue
 
-            is_gamma = (entry_time >= dtime(14, 0))
+            is_gamma = (entry_time >= dtime(13, 0))   # afternoon (REENTRY+GAMMA): lower threshold, tighter SL
 
             # Find entry bar for this window
             entry_bar = None
