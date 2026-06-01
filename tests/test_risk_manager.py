@@ -161,9 +161,9 @@ class TestDailyDrawdown:
         portfolio = {"initial_balance": 10000, "current_value": 9700}
         assert _calculate_daily_drawdown(portfolio) == pytest.approx(3.0, abs=0.01)
 
-    def test_default_anchor_10k_when_nothing_set(self):
-        portfolio = {"current_value": 9800}
-        # falls back to default $10k
+    def test_default_anchor_500k_when_nothing_set(self):
+        portfolio = {"current_value": 490000}
+        # falls back to default $500k → 2% drawdown
         assert _calculate_daily_drawdown(portfolio) == pytest.approx(2.0, abs=0.01)
 
     def test_positive_pnl_returns_zero_not_negative(self):

@@ -27,6 +27,8 @@ def main():
     plt.ylabel('Y-axis')
     plt.savefig('plot.png')
 
+    return df
+
 if __name__ == '__main__':
     main()
     new_engine()

@@ -51,3 +51,6 @@ api_audit.json
 api_verify.json
 vix_verify.json
 site_audit.html
+
+# Test artifacts
+plot.png
