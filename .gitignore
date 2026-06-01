@@ -16,6 +16,7 @@ data_cache/
 # Large local data + backtest result artifacts (regenerable)
 SPY_1min_data.csv
 *_1min_data.csv
+*_1min_synthetic.csv
 backtest_v4.json
 backtest_futures.json
 
