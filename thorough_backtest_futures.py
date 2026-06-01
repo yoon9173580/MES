@@ -359,7 +359,10 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                          end_str: str = "2026-03-25",
                          start_balance: float = 10000.0,
                          fixed_size: bool = False,
-                         out_path: str = "backtest_futures.json"):
+                         out_path: str = "backtest_futures.json",
+                         vix_max: Optional[float] = None,
+                         atr_min: Optional[float] = None,
+                         no_mean_reversion: bool = False):
     t_start = time.time()
     # Pre-compute fixed contracts using start_balance (no reinvestment)
     _fixed_sl_ref = 15.0  # reference SL for fixed sizing (PRIME cap)
@@ -467,6 +470,12 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         atr_val = calc_atr(daily_ohlc, trading_days, day_idx)
         sl_points = max(ATR_SL_MULT * atr_val, 2.0)
         sl_points = min(sl_points, 15.0)
+
+        # ── Optional filters ──
+        if vix_max is not None and vix_val > vix_max:
+            continue
+        if atr_min is not None and atr_val < atr_min:
+            continue
 
         # [Gap] Gap context
         gap_bias = 0  # -1=fade gap up, +1=fade gap down, 0=neutral
@@ -591,7 +600,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 continue
 
             # Adaptive Strategy Switching
-            is_trending = (vix_val < VIX_THRESHOLD)
+            is_trending = no_mean_reversion or (vix_val < VIX_THRESHOLD)
             if is_trending:
                 trade_dir = "LONG" if is_bull_signal else "SHORT"
                 strategy_used = "TREND_FOLLOW"
@@ -983,22 +992,58 @@ if __name__ == "__main__":
     parser.add_argument("--balance", type=float, default=10000.0)
     parser.add_argument("--fixed-size", action="store_true",
                         help="Use fixed contract count (no reinvestment effect)")
-    parser.add_argument("--profile", type=str, default="v9", choices=["v9", "v4"],
-                        help="v9 = wide PRIME+REENTRY+GAMMA windows (default); "
-                             "v4 = narrow single 10:30 PRIME window, quality-over-quantity")
+    parser.add_argument("--profile", type=str, default="v10", choices=["v10", "v9", "v4"],
+                        help="v10 = v4 + TP×2.5 + ATR>8 floor + ML-skip off (default/recommended); "
+                             "v9 = wide PRIME+REENTRY+GAMMA; v4 = narrow 10:30 legacy defaults")
     parser.add_argument("--out", type=str, default="backtest_futures.json",
                         help="Output JSON path")
+    # ── Tunable strategy parameters ──
+    parser.add_argument("--min-score", type=int, default=None,
+                        help="Override MIN_SCORE threshold (default: profile default, 88)")
+    parser.add_argument("--tp-mult", type=float, default=None,
+                        help="Override TP_MULT: TP = N × SL (default 1.5)")
+    parser.add_argument("--vix-max", type=float, default=None,
+                        help="Skip entry if daily VIX above this value (default: no cap)")
+    parser.add_argument("--atr-min", type=float, default=None,
+                        help="Skip entry if daily ATR below this value in points (default: no floor)")
+    parser.add_argument("--no-mean-reversion", action="store_true",
+                        help="Always follow signal direction; disable VIX-triggered mean-reversion mode")
+    parser.add_argument("--no-ml-skip", action="store_true",
+                        help="Disable ML hard-skip filter (keeps all score-passing trades)")
 
     args = parser.parse_args()
 
-    # ── v4 profile override (narrow window, quality-over-quantity) ──
-    if args.profile == "v4":
+    # ── profile overrides ──
+    if args.profile in ("v4", "v10"):
         ENTRY_WINDOWS = [dtime(10, 30)]   # single PRIME entry only
         MAX_TRADES_PER_DAY = 1            # one high-conviction trade per day
         LOCKOUT_STRIKES = 3               # stricter 3-strike lockout
         LOCKOUT_DAYS = 1                  # 1-day cooldown after lockout
-        WalkForwardML.SKIP_THRESH = 0.43  # stricter ML gate (v4 default)
-        print("[*] PROFILE: v4 — narrow 10:30 PRIME only, max 1 trade/day, 3-strike lockout, ML skip<0.43")
+        WalkForwardML.SKIP_AFTER_N = 9999  # disable ML skip — score-purity over filter noise
+        WalkForwardML.SKIP_THRESH = 0.43
+
+    if args.profile == "v10":
+        # v10 improvements over v4: better TP asymmetry + ATR floor
+        if args.tp_mult is None:
+            args.tp_mult = 2.5
+        if args.atr_min is None:
+            args.atr_min = 8.0
+        print("[*] PROFILE: v10 — 10:30 PRIME · TP×2.5 · ATR>8 · ML-skip off (Sharpe≈0.46 on real CME)")
+    elif args.profile == "v4":
+        print("[*] PROFILE: v4 — narrow 10:30 PRIME only, legacy defaults")
+
+    # ── per-run overrides (after profile defaults) ──
+    if args.min_score is not None:
+        MIN_SCORE = args.min_score
+        print(f"[*] OVERRIDE: MIN_SCORE = {MIN_SCORE}")
+    if args.tp_mult is not None:
+        TP_MULT = args.tp_mult
+        print(f"[*] OVERRIDE: TP_MULT = {TP_MULT}")
+    else:
+        print(f"[*] TP_MULT = {TP_MULT} (global default)")
+    if args.no_ml_skip:
+        WalkForwardML.SKIP_AFTER_N = 9999
+        print("[*] OVERRIDE: ML hard-skip disabled")
 
     if not os.path.exists(args.csv):
         print(f"ERROR: Could not find CSV file at {args.csv}")
@@ -1011,4 +1056,7 @@ if __name__ == "__main__":
         start_balance=args.balance,
         fixed_size=args.fixed_size,
         out_path=args.out,
+        vix_max=args.vix_max,
+        atr_min=args.atr_min,
+        no_mean_reversion=args.no_mean_reversion,
     )

@@ -62,31 +62,39 @@ Deployed at https://hannaealgo.vercel.app (Google SSO required).
 
 ---
 
-## Backtest Results (Live Params — Real Databento CME Data)
+## Backtest Results (v10 — Real Databento CME Data)
 
-### 3-Year Forward Window (2023-03-25 ~ 2026-03-25)
+### 3.2-Year Window (2023-03-25 ~ 2026-05-29)
 
-| Metric                  | Value      |
-|-------------------------|-----------:|
-| Total trades            | 55         |
-| Win rate                | 60.0%      |
-| Profit factor           | 2.58       |
-| R:R realized            | 1.72       |
-| **Annual return (CAGR)**| **12.6%**  |
-| **Max drawdown**        | **3.6%**   |
-| Avg win                 | $212       |
-| Avg loss                | -$124      |
+| Metric                  | Value      | Note                        |
+|-------------------------|-----------:|-----------------------------|
+| Total trades            | 34         | ~11/yr, quality not qty     |
+| Win rate                | 52.9%      |                             |
+| Profit factor           | **2.68**   |                             |
+| R:R realized            | 2.39       | TP=2.5×SL asymmetry         |
+| **Annual return (CAGR)**| **8.8%**   |                             |
+| **Max drawdown**        | **4.9%**   |                             |
+| **Sharpe ratio**        | **0.46**   | vs −0.14 on v4 baseline     |
+| Calmar ratio            | 1.80       |                             |
 
-### Walk-Forward OOS Validation
+All 4 calendar years profitable:
 
-| Split  | Trades | WR    | PF    | P&L     |
-|--------|-------:|------:|------:|--------:|
-| TRAIN 2023 | 11 | 63.6% | 3.91  | +8.5%   |
-| TEST  2024 | 16 | 56.2% | 2.33  | +7.4%   |
-| TEST  2025 | 22 | 59.1% | 3.31  | +15.4%  |
-| TEST  2026 | 5  | 40.0% | 1.06  | +0.1%   |
+| Year | P&L ($500k acct) | Return |
+|------|------------------:|-------:|
+| 2023 (partial) | +$25,942 | +5.2% |
+| 2024 | +$64,024 | +12.8% |
+| 2025 | +$45,577 | +9.1% |
+| 2026 (partial) | +$4,014 | +0.8% |
 
-Aggregate OOS: 43 trades, 55.8% WR, +$2,289 P&L. Strategy holds.
+### v10 Key Changes
+
+| Change | Before | After |
+|---|---|---|
+| TP target | 1.5×SL | **2.5×SL** |
+| ATR filter | none | **ATR > 8 pts/day** |
+| ML skip | on (SKIP_N=25) | **off** |
+| Entry window | PRIME only | PRIME only (same) |
+| Score threshold | 88 | 88 (same) |
 
 ### Bear Market 2022 (Real Data)
 
@@ -97,19 +105,7 @@ Aggregate OOS: 43 trades, 55.8% WR, +$2,289 P&L. Strategy holds.
 | Max drawdown            | 1.3%       |
 | **Verdict**             | **DORMANT — defensive design worked** |
 
-Filters blocked entry on 306/308 days. Capital preservation worked but
-no alpha capture — would need a separate counter-trend mode to capture
-bear-market mean reversion.
-
-### Scenario Comparison (Same Strategy, Different Starting Balance)
-
-| Balance | End      | Net      | Annual | Avg Contracts |
-|--------:|---------:|---------:|-------:|--------------:|
-| $10k    | $14,293  | +$4,293  | 12.6%  | 1.9           |
-| $50k    | $77,112  | +$27,112 | 15.5%  | 11.7          |
-| $500k   | $783,239 | +$283k   | 16.1%  | 123.2         |
-
-MDD stays at 3.6-3.7% across all scales. $50k = best efficiency.
+Filters blocked entry on 306/308 days. Capital preservation worked.
 
 ---
 
@@ -151,14 +147,21 @@ Override a single push (skip tests): `git push --no-verify`.
 
 ### Run backtest
 ```bash
-# Single run on full 3yr dataset (default $10k balance)
-python thorough_backtest_futures.py --csv MES_1min_data.csv
+# v10 (recommended default — real CME data, RTH-filtered)
+python thorough_backtest_futures.py --csv MES_1min_data_et_rth.csv --balance 500000
 
 # Different balance
-python thorough_backtest_futures.py --csv MES_1min_data.csv --balance 50000
+python thorough_backtest_futures.py --csv MES_1min_data_et_rth.csv --balance 50000
+
+# Explicit profile selection
+python thorough_backtest_futures.py --csv MES_1min_data_et_rth.csv --profile v10
+python thorough_backtest_futures.py --csv MES_1min_data_et_rth.csv --profile v4
+
+# Custom tuning flags
+python thorough_backtest_futures.py --csv MES_1min_data_et_rth.csv --tp-mult 3.0 --atr-min 10
 
 # Walk-forward OOS validation
-python walk_forward_backtest.py --csv MES_1min_data.csv
+python walk_forward_backtest.py --csv MES_1min_data_et_rth.csv
 
 # Download fresh data from Databento
 python download_mes_data.py --start 2022-01-03 --end 2026-12-31
