@@ -11,12 +11,12 @@ Integrated Strategies (from top futures traders):
   - ATR-Based Dynamic SL (1.5x ATR, adapts to volatility)
   - Kelly-Informed Position Sizing (10% risk, margin-aware)
 
-Optimal Configuration (Aggressive Optimizer - 170+ combinations tested):
-  - Entry: 10:30 AM | Exit: 15:30 PM
-  - SL = 1.5x ATR(14) dynamic (adapts to volatility)
-  - MIN_SCORE = 90 + NR7/Pullback bonuses
-  - Risk = 10% per trade (Kelly-informed, well below optimal 26%)
-  - Margin = $500/contract (discount broker ES day-trading margin)
+v5 Configuration (High-Frequency Dual-Window):
+  - Entry: PRIME 10:30 AM + GAMMA 14:00 PM | Exit: 15:30 PM
+  - SL = 1.5x ATR PRIME / 1.125x ATR GAMMA (tighter for 90-min window)
+  - MIN_SCORE = 78 (MODERATE grade; STRONG = 88+)
+  - Risk = 1.5% per trade | LockoutStrikes=3 | LockoutDays=1
+  - Margin = $50/contract (MES day-trading margin)
 
 Product: Micro E-mini S&P 500 (MES)
   - 1 ES contract = $50 per point of S&P 500
@@ -29,12 +29,24 @@ import sys
 import json
 import time
 import argparse
+import warnings
 from datetime import datetime, timedelta, time as dtime
 from typing import Optional, List, Dict
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import pytz
+warnings.filterwarnings("ignore")
+
+# ML imports
+try:
+    import lightgbm as lgb
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LogisticRegression
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    print("[!] ML libraries not found. pip install scikit-learn lightgbm")
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "api"))
 from engines.regime import calculate_regime_score
@@ -50,22 +62,32 @@ ES_COMMISSION_RT = 0.50    # Round-trip commission per MES contract
 ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
-# -- Strategy Parameters (matches api/data.py live RISK_PCT) --
-MIN_SCORE = 88              # Slightly relaxed for more trades (88 vs 90)
-RISK_PCT = 0.015            # 1.5% per-trade risk (live system value)
-MARGIN_UTIL = 0.95          # 95% margin utilization allowed
-EXIT_TIME = dtime(15, 30)   # Exit at 15:30 (avoid last 30min noise)
-VIX_THRESHOLD = 20.0        # VIX < 20 = Trend Follow, >= 20 = Mean Reversion
-ADX_RUNAWAY = 40.0           # ADX runaway veto
-RSI_UPPER = 90.0             # RSI upper veto
-RSI_LOWER = 10.0             # RSI lower veto
-SECTOR_THRESHOLD = 1.8       # Sector breakout veto
-LOCKOUT_STRIKES = 2          # Consecutive losses before lockout
-LOCKOUT_DAYS = 3             # Days to cool down
-ATR_SL_MULT = 1.5            # SL = 1.5x ATR(14) dynamic
-TRAILING_ACTIVATION = 1.0    # Activate trailing stop after 1.0x ATR profit
-TRAILING_STEP = 0.5          # Trail by 0.5x ATR behind highest profit
-BREAKEVEN_AT = 0.5           # Move SL to breakeven after 0.5x ATR profit
+# -- Strategy Parameters v9 --
+MIN_SCORE = 88              # PRIME window minimum (STRONG grade)
+GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
+RISK_PCT = 0.015
+MARGIN_UTIL = 0.95
+EXIT_TIME = dtime(15, 30)
+VIX_THRESHOLD = 20.0
+ADX_RUNAWAY = 40.0
+RSI_UPPER = 90.0
+RSI_LOWER = 10.0
+SECTOR_THRESHOLD = 1.8
+LOCKOUT_STRIKES = 5         # lenient lockout (was 2)
+LOCKOUT_DAYS = 0            # no cooldown period (was 1)
+ATR_SL_MULT = 1.5
+TP_MULT = 1.5               # TP = 1.5x SL
+TRAILING_ACTIVATION = 0.5
+TRAILING_STEP = 0.25
+BREAKEVEN_AT = 0.25
+
+# -- Entry Windows: PRIME (10:30~11:30) + REENTRY (13:00~13:30) + GAMMA (14:00~14:45) --
+ENTRY_WINDOWS = [
+    dtime(10, 30), dtime(10, 45), dtime(11, 0), dtime(11, 15), dtime(11, 30),  # PRIME (20pts)
+    dtime(13, 0),  dtime(13, 30),                                              # REENTRY (afternoon)
+    dtime(14, 0),  dtime(14, 15), dtime(14, 30), dtime(14, 45),                # GAMMA (15pts)
+]
+MAX_TRADES_PER_DAY = 4       # Up to 4 positions per day (PRIME + REENTRY + GAMMA)
 
 # -- Pro Strategy Bonuses --
 NR7_SCORE_BOOST = 5          # Score boost on NR7 days (Crabel)
@@ -173,14 +195,181 @@ def check_daily_bias(daily_ohlc, trading_days, idx, spy_open):
     return True
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Walk-Forward ML System
+# ─────────────────────────────────────────────────────────────────────────────
+class WalkForwardML:
+    """
+    Walk-Forward ML 사이징+필터링 시스템.
+    - SKIP_AFTER_N 건 이후: P(win) < SKIP_THRESH → 진입 차단
+    - P(win) >= SIZE_HIGH  → 계약수 +30%
+    - P(win) >= SIZE_MED   → 계약수 +15%
+    - P(win) <  SIZE_LOW   → 계약수 -20%
+    """
+    MIN_TRAIN    = 15
+    SKIP_AFTER_N = 25    # start hard-filtering after 25 completed trades
+    SKIP_THRESH  = 0.35  # skip if confidence < this threshold (loosened from 0.43 for more trades)
+    RETRAIN_N    = 5
+    SIZE_HIGH  = 0.62   # +30%
+    SIZE_MED   = 0.55   # +15%
+    SIZE_LOW   = 0.44   # -20%
+
+    FEATURE_NAMES = [
+        "score_norm", "vix_norm", "atr_pct",
+        "is_long", "day_of_week", "month_norm",
+        "recent_wr5", "streak_norm",
+        "open_momentum", "vix_regime",
+    ]
+
+    def __init__(self):
+        self.X: List[List[float]] = []
+        self.y: List[int] = []
+        self.model = None
+        self.scaler = None
+        self.is_trained = False
+        self.n_since_retrain = 0
+        self.conf_history: List[float] = []        # all predictions (including skipped)
+        self.executed_confs: List[float] = []      # confs for executed trades only
+        self.feature_importance: Dict[str, float] = {}
+
+    @staticmethod
+    def features(score: float, vix: float, atr: float, price: float,
+                 direction: str, date_dt, recent_wr5: float,
+                 consec_wins: int, consec_losses: int,
+                 day_open: float = 0.0) -> List[float]:
+        atr_pct    = min(atr / max(price, 1), 0.05) / 0.05
+        vix_norm   = min(vix, 40) / 40.0
+        streak     = (min(consec_wins, 5) - min(consec_losses, 5)) / 5.0
+        open_mom   = float(np.clip((price - day_open) / max(atr, 1), -2, 2) / 2.0)
+        vix_regime = float(np.clip(vix / max(atr * 0.4, 1), 0, 3) / 3.0)
+        return [
+            score / 100.0,
+            vix_norm,
+            atr_pct,
+            1.0 if direction == "LONG" else 0.0,
+            date_dt.weekday() / 4.0,
+            (date_dt.month - 1) / 11.0,
+            recent_wr5,
+            streak,
+            open_mom,
+            vix_regime,
+        ]
+
+    def predict(self, feat: List[float]) -> float:
+        if not self.is_trained or self.model is None:
+            return 0.5
+        try:
+            from sklearn.preprocessing import StandardScaler
+            X = self.scaler.transform(np.array(feat).reshape(1, -1))
+            return float(self.model.predict_proba(X)[0][1])
+        except Exception:
+            return 0.5
+
+    def update(self, feat: List[float], won: bool) -> None:
+        self.X.append(feat)
+        self.y.append(1 if won else 0)
+        if self.conf_history:
+            self.executed_confs.append(self.conf_history[-1])
+        self.n_since_retrain += 1
+        if len(self.X) >= self.MIN_TRAIN and self.n_since_retrain >= self.RETRAIN_N:
+            self._fit()
+
+    def _fit(self) -> None:
+        X = np.array(self.X)
+        y = np.array(self.y)
+        if len(np.unique(y)) < 2:
+            return
+        try:
+            from sklearn.preprocessing import StandardScaler
+            self.scaler = StandardScaler()
+            Xs = self.scaler.fit_transform(X)
+            if ML_AVAILABLE:
+                import lightgbm as lgb
+                params = dict(
+                    n_estimators=60, max_depth=3, learning_rate=0.1,
+                    num_leaves=7, min_child_samples=4, subsample=0.8,
+                    colsample_bytree=0.8, reg_lambda=1.5,
+                    objective="binary", verbose=-1, n_jobs=1,
+                    class_weight="balanced", random_state=42,
+                )
+                self.model = lgb.LGBMClassifier(**params)
+                self.model.fit(Xs, y)
+                imp = self.model.feature_importances_
+                total = max(float(imp.sum()), 1e-9)
+                self.feature_importance = {
+                    n: round(float(v) / total, 4)
+                    for n, v in zip(self.FEATURE_NAMES, imp)
+                }
+            else:
+                from sklearn.linear_model import LogisticRegression
+                self.model = LogisticRegression(C=0.3, max_iter=1000, random_state=42, class_weight="balanced")
+                self.model.fit(Xs, y)
+                coef = np.abs(self.model.coef_[0])
+                total = max(float(coef.sum()), 1e-9)
+                self.feature_importance = {
+                    n: round(float(v) / total, 4)
+                    for n, v in zip(self.FEATURE_NAMES, coef)
+                }
+            self.is_trained = True
+            self.n_since_retrain = 0
+        except Exception as e:
+            pass
+
+    def should_skip(self) -> bool:
+        """Returns True if this trade should be skipped (low ML confidence after sufficient training)."""
+        if not self.is_trained or len(self.y) < self.SKIP_AFTER_N or not self.conf_history:
+            return False
+        return self.conf_history[-1] < self.SKIP_THRESH
+
+    def apply_sizing(self, num_contracts: int, max_contracts: int) -> int:
+        if not self.is_trained or not self.conf_history:
+            return num_contracts
+        conf = self.conf_history[-1]
+        if conf >= self.SIZE_HIGH:
+            return min(int(num_contracts * 1.30), max_contracts)
+        elif conf >= self.SIZE_MED:
+            return min(int(num_contracts * 1.15), max_contracts)
+        elif conf < self.SIZE_LOW:
+            return max(int(num_contracts * 0.80), 1)
+        return num_contracts
+
+    def stats(self) -> Dict:
+        if not self.y:
+            return {}
+        conf_arr = np.array(self.conf_history) if self.conf_history else np.array([0.5])
+        # Use aligned executed_confs (same length as y) for accurate high_conf_wr
+        confs_exec = self.executed_confs if self.executed_confs else [0.5] * len(self.y)
+        wins_in_high = sum(
+            1 for c, w in zip(confs_exec, self.y)
+            if c >= self.SIZE_HIGH and w == 1
+        )
+        n_high = sum(1 for c in confs_exec if c >= self.SIZE_HIGH)
+        return {
+            "total_predictions":  len(self.conf_history),
+            "training_samples":   len(self.X),
+            "avg_confidence":     round(float(conf_arr.mean()), 3),
+            "high_conf_wr":       round(wins_in_high / max(n_high, 1), 3),
+            "historical_wr":      round(sum(self.y) / max(len(self.y), 1), 3),
+            "feature_importance": self.feature_importance,
+            "confidence_series":  [round(c, 3) for c in self.conf_history],
+        }
+
+
 def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                          end_str: str = "2026-03-25",
-                         start_balance: float = 10000.0):
+                         start_balance: float = 10000.0,
+                         fixed_size: bool = False):
     t_start = time.time()
+    # Pre-compute fixed contracts using start_balance (no reinvestment)
+    _fixed_sl_ref = 15.0  # reference SL for fixed sizing (PRIME cap)
+    _fixed_risk_per = (_fixed_sl_ref + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
+    FIXED_CONTRACTS = max(1, int((start_balance * RISK_PCT) / _fixed_risk_per))
     print("=" * 80)
     print("  MICRO E-MINI (MES) - PRO TRADER STRATEGY INTEGRATION")
     print(f"  ATR SL={ATR_SL_MULT}x | Risk={RISK_PCT*100:.1f}% | Margin=${ES_DAY_MARGIN:.0f}")
     print(f"  NR7 + 3Day Pullback + Gap + Daily Bias | MIN_SCORE={MIN_SCORE}")
+    sizing_mode = f"FIXED ({FIXED_CONTRACTS}계약)" if fixed_size else "DYNAMIC (잔고비례)"
+    print(f"  포지션 사이징: {sizing_mode}")
     print("=" * 80)
 
     # 1. Load VIX
@@ -192,11 +381,14 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     df = pd.read_csv(csv_path)
     print(f"[*] Loaded {len(df):,} rows in {time.time()-t0:.1f}s.")
 
-    # Parse timestamps and localize to NY
+    # Parse timestamps — CSV is already in NY local time (generated by gen_synthetic_1min.py)
     print("[*] Parsing timestamps...")
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df.set_index("timestamp", inplace=True)
-    df.index = df.index.tz_localize("UTC").tz_convert(NY) if df.index.tz is None else df.index.tz_convert(NY)
+    if df.index.tz is None:
+        df.index = df.index.tz_localize(NY, ambiguous="infer", nonexistent="shift_forward")
+    else:
+        df.index = df.index.tz_convert(NY)
     df = df.sort_index()
 
     # Filter dates
@@ -234,6 +426,9 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     lockout_cooldown = 0
     monthly_pnl: Dict[str, float] = {}    # "YYYY-MM" -> net P&L
     daily_balance: Dict[str, float] = {}  # "YYYY-MM-DD" -> closing balance
+
+    # ML Walk-Forward System 초기화
+    ml = WalkForwardML()
 
     pbar = tqdm(trading_days, desc="Backtesting Days")
 
@@ -286,242 +481,308 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 elif gap_pct < -0.1:
                     gap_bias = 1   # Small gap down: bullish
 
-        # ===== Score Engine at 10:30 AM =====
-        entry_time = dtime(10, 30)
-        entry_bar = None
-        for ts, o, h, l, c, v in day_bars:
-            if ts.time() >= entry_time:
-                entry_bar = (ts, o, h, l, c, v)
+        # ===== Multi-Window Entry Scan: PRIME (10:30~11:15) + GAMMA (14:00~14:30) =====
+        trades_today = 0
+        last_exit_time_today = dtime(0, 0)   # track last exit to prevent overlap
+        for entry_time in ENTRY_WINDOWS:
+            if trades_today >= MAX_TRADES_PER_DAY:
                 break
-        if not entry_bar:
-            continue
-
-        ts_entry, spy_entry_price, _, _, _, _ = entry_bar
-
-        # Slice morning bars
-        df_morning = df_day[df_day.index.time <= entry_time].copy()
-        if len(df_morning) < 5:
-            continue
-        df_morning.columns = [col.capitalize() for col in df_morning.columns]
-
-        # Sector returns
-        spy_morning_ret = ((spy_entry_price / spy_o) - 1.0) * 100
-        pcts = {
-            "SPY": spy_morning_ret,
-            "QQQ": spy_morning_ret * 1.2 if spy_morning_ret >= 0 else spy_morning_ret * 1.3,
-            "IWM": spy_morning_ret * 0.9,
-            "DIA": spy_morning_ret * 0.8
-        }
-
-        # Morning metrics
-        vwap_morning = (df_morning["High"] * df_morning["Volume"]).sum() / df_morning["Volume"].sum() if df_morning["Volume"].sum() > 0 else spy_entry_price
-        range_morning = float(df_morning["High"].max() - df_morning["Low"].min())
-        avg_5min_vol = df_morning["Volume"].tail(5).mean()
-        avg_morning_vol = df_morning["Volume"].mean()
-        vol_ratio = avg_5min_vol / avg_morning_vol if avg_morning_vol > 0 else 1.0
-
-        # Score Engine
-        try:
-            regime = calculate_regime_score(
-                vix_price=vix_val, vix3m_price=vix_val * 1.08,
-                spy_price=spy_entry_price, prev_close=spy_o, spy_history=df_morning)
-            corr = calculate_correlation_score(pcts)
-            time_win = calculate_time_score(ts_entry)
-            tech = calculate_technical_score(spy_entry_price, vwap_morning, vol_ratio, range_morning, df_morning)
-
-            active_scores = [regime["score"], corr["score"], time_win["score"], tech["score"]]
-            active_max = regime["max"] + corr["max"] + time_win["max"] + tech["max"]
-            normalized = int((sum(active_scores) / active_max) * 100) if active_max > 0 else 0
-            direction = tech.get("direction_bias", "NEUTRAL")
-        except Exception:
-            continue
-
-        # ===== PRO STRATEGY: Score Boosting =====
-        boosted_score = normalized
-        boost_reasons = []
-
-        if is_nr7:
-            boosted_score += NR7_SCORE_BOOST
-            boost_reasons.append("NR7")
-
-        if is_pullback and direction == "CALL":
-            boosted_score += PULLBACK_SCORE_BOOST
-            boost_reasons.append("3DAY_PB")
-
-        # -- Runaway Trend Veto --
-        is_runaway_trend = False
-        adx_val = regime.get("details", {}).get("adx", {}).get("value")
-        if adx_val is not None and adx_val >= ADX_RUNAWAY:
-            is_runaway_trend = True
-        rsi_val = tech.get("rsi")
-        if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
-            is_runaway_trend = True
-        spy_ret, qqq_ret, iwm_ret = pcts.get("SPY", 0), pcts.get("QQQ", 0), pcts.get("IWM", 0)
-        if (spy_ret > SECTOR_THRESHOLD and qqq_ret > SECTOR_THRESHOLD and iwm_ret > SECTOR_THRESHOLD) or \
-           (spy_ret < -SECTOR_THRESHOLD and qqq_ret < -SECTOR_THRESHOLD and iwm_ret < -SECTOR_THRESHOLD):
-            is_runaway_trend = True
-
-        # Entry filter — accept both legacy CALL/PUT and new LONG/SHORT bias outputs
-        grade = "STRONG" if boosted_score >= MIN_SCORE else "MODERATE" if boosted_score >= 75 else "WEAK"
-        if boosted_score < MIN_SCORE or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
-            continue
-
-        # Normalize to LONG/SHORT internally
-        is_bull_signal = direction in ("CALL", "LONG")
-        is_bear_signal = direction in ("PUT", "SHORT")
-
-        # Daily Bias Filter: skip SHORT in bullish daily trend (low VIX)
-        if daily_trend_long and is_bear_signal and vix_val < VIX_THRESHOLD:
-            continue
-
-        # -- Adaptive Strategy Switching --
-        is_trending = (vix_val < VIX_THRESHOLD)
-        if is_trending:
-            trade_dir = "LONG" if is_bull_signal else "SHORT"
-            strategy_used = "TREND_FOLLOW"
-        else:
-            trade_dir = "SHORT" if is_bull_signal else "LONG"
-            strategy_used = "MEAN_REVERSION"
-
-        # -- Kelly-Informed Position Sizing --
-        max_risk_dollar = balance * RISK_PCT
-        risk_per_contract = (sl_points + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
-        num_contracts = int(max_risk_dollar / risk_per_contract)
-        if num_contracts == 0:
-            num_contracts = 1
-
-        # Margin check
-        max_by_margin = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
-        if max_by_margin == 0:
-            max_by_margin = 1
-        num_contracts = min(num_contracts, max_by_margin)
-        if num_contracts * ES_DAY_MARGIN > balance:
-            continue
-
-        # -- Minute-by-Minute Price Simulation with Trailing Stop --
-        entry_price = spy_entry_price
-        sl_target = entry_price - sl_points if trade_dir == "LONG" else entry_price + sl_points
-        breakeven_activated = False
-        trailing_activated = False
-        best_price = entry_price  # Track best favorable price
-
-        exit_price = None
-        exit_type = "EOD"
-        exit_time_str = f"{EXIT_TIME.hour}:{EXIT_TIME.minute:02d}"
-
-        for ts_bar, o_bar, h_bar, l_bar, c_bar, v_bar in day_bars:
-            if ts_bar.time() <= entry_time:
+            # Skip if last position hasn't closed yet (prevent concurrent overlap)
+            if entry_time <= last_exit_time_today:
                 continue
-            if ts_bar.time() > EXIT_TIME:
-                break
 
-            # Track best price for trailing stop
-            if trade_dir == "LONG":
-                if h_bar > best_price:
-                    best_price = h_bar
-                current_profit_pts = best_price - entry_price
+            is_gamma = (entry_time >= dtime(13, 0))   # afternoon (REENTRY+GAMMA): lower threshold, tighter SL
 
-                # Breakeven stop: move SL to entry after 0.5x ATR profit
-                if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
-                    sl_target = entry_price + ES_SLIPPAGE_PTS  # Breakeven + cover slippage
-                    breakeven_activated = True
-
-                # Trailing stop: activate after 1.0x ATR profit, trail 0.5x ATR behind peak
-                if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
-                    trailing_sl = best_price - TRAILING_STEP * atr_val
-                    if trailing_sl > sl_target:
-                        sl_target = trailing_sl
-                        trailing_activated = True
-
-                # Check SL hit
-                if l_bar <= sl_target:
-                    exit_price = sl_target
-                    exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
-                    exit_time_str = ts_bar.strftime("%H:%M")
+            # Find entry bar for this window
+            entry_bar = None
+            for ts, o, h, l, c, v in day_bars:
+                if ts.time() >= entry_time:
+                    entry_bar = (ts, o, h, l, c, v)
                     break
-            else:  # SHORT
-                if l_bar < best_price:
-                    best_price = l_bar
-                current_profit_pts = entry_price - best_price
+            if not entry_bar:
+                continue
 
-                # Breakeven stop
-                if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
-                    sl_target = entry_price - ES_SLIPPAGE_PTS
-                    breakeven_activated = True
+            ts_entry, spy_entry_price, _, _, _, _ = entry_bar
 
-                # Trailing stop
-                if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
-                    trailing_sl = best_price + TRAILING_STEP * atr_val
-                    if trailing_sl < sl_target:
-                        sl_target = trailing_sl
-                        trailing_activated = True
+            # Tighter SL for GAMMA (only ~90 min until EOD exit)
+            gamma_mult = 0.75 if is_gamma else 1.0
+            sl_cap = 10.0 if is_gamma else 15.0
+            window_sl = max(ATR_SL_MULT * gamma_mult * atr_val, 2.0)
+            window_sl = min(window_sl, sl_cap)
 
-                # Check SL hit
-                if h_bar >= sl_target:
-                    exit_price = sl_target
-                    exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
-                    exit_time_str = ts_bar.strftime("%H:%M")
-                    break
+            # Slice bars up to entry time for scoring
+            df_morning = df_day[df_day.index.time <= entry_time].copy()
+            if len(df_morning) < 5:
+                continue
+            df_morning.columns = [col.capitalize() for col in df_morning.columns]
 
-        # Exit at EXIT_TIME fallback
-        if exit_price is None:
-            eod_price = None
-            for bar_ts, bar_o, bar_h, bar_l, bar_c, bar_v in reversed(day_bars):
-                if bar_ts.time() <= EXIT_TIME:
-                    eod_price = bar_c; break
-            if eod_price is None:
-                eod_price = float(df_day["Close"].iloc[-1])
-            exit_price = eod_price
+            # Sector returns (relative to day open)
+            spy_morning_ret = ((spy_entry_price / spy_o) - 1.0) * 100
+            pcts = {
+                "SPY": spy_morning_ret,
+                "QQQ": spy_morning_ret * 1.2 if spy_morning_ret >= 0 else spy_morning_ret * 1.3,
+                "IWM": spy_morning_ret * 0.9,
+                "DIA": spy_morning_ret * 0.8
+            }
+
+            # Window metrics
+            vwap_morning = (df_morning["High"] * df_morning["Volume"]).sum() / df_morning["Volume"].sum() if df_morning["Volume"].sum() > 0 else spy_entry_price
+            range_morning = float(df_morning["High"].max() - df_morning["Low"].min())
+            avg_5min_vol = df_morning["Volume"].tail(5).mean()
+            avg_morning_vol = df_morning["Volume"].mean()
+            vol_ratio = avg_5min_vol / avg_morning_vol if avg_morning_vol > 0 else 1.0
+
+            # Score Engine
+            try:
+                regime = calculate_regime_score(
+                    vix_price=vix_val, vix3m_price=vix_val * 1.08,
+                    spy_price=spy_entry_price, prev_close=spy_o, spy_history=df_morning)
+                corr = calculate_correlation_score(pcts)
+                time_win = calculate_time_score(ts_entry)
+                tech = calculate_technical_score(spy_entry_price, vwap_morning, vol_ratio, range_morning, df_morning)
+
+                active_scores = [regime["score"], corr["score"], time_win["score"], tech["score"]]
+                # Use actual window score as time ceiling — GAMMA(15pts) gets active_max=105,
+                # PRIME(20pts) gets active_max=110, making both fairly comparable at 88 threshold
+                active_max = regime["max"] + corr["max"] + time_win["score"] + tech["max"]
+                if active_max <= 0:
+                    active_max = 110
+                normalized = int((sum(active_scores) / active_max) * 100)
+                direction = tech.get("direction_bias", "NEUTRAL")
+            except Exception:
+                continue
+
+            # Score Boosting
+            boosted_score = normalized
+            boost_reasons = []
+            if is_nr7:
+                boosted_score += NR7_SCORE_BOOST
+                boost_reasons.append("NR7")
+            if is_pullback and direction == "CALL":
+                boosted_score += PULLBACK_SCORE_BOOST
+                boost_reasons.append("3DAY_PB")
+
+            # Runaway Trend Veto
+            is_runaway_trend = False
+            adx_val = regime.get("details", {}).get("adx", {}).get("value")
+            if adx_val is not None and adx_val >= ADX_RUNAWAY:
+                is_runaway_trend = True
+            rsi_val = tech.get("rsi")
+            if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
+                is_runaway_trend = True
+            spy_ret, qqq_ret, iwm_ret = pcts.get("SPY", 0), pcts.get("QQQ", 0), pcts.get("IWM", 0)
+            if (spy_ret > SECTOR_THRESHOLD and qqq_ret > SECTOR_THRESHOLD and iwm_ret > SECTOR_THRESHOLD) or \
+               (spy_ret < -SECTOR_THRESHOLD and qqq_ret < -SECTOR_THRESHOLD and iwm_ret < -SECTOR_THRESHOLD):
+                is_runaway_trend = True
+
+            # Entry filter — GAMMA uses lower threshold (scores naturally lower at 14:00)
+            effective_min = GAMMA_MIN_SCORE if is_gamma else MIN_SCORE
+            grade = "STRONG" if boosted_score >= 88 else "MODERATE" if boosted_score >= effective_min else "WEAK"
+            if boosted_score < effective_min or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
+                continue
+
+            # Normalize to LONG/SHORT
+            is_bull_signal = direction in ("CALL", "LONG")
+            is_bear_signal = direction in ("PUT", "SHORT")
+
+            # Daily Bias Filter: skip SHORT in bullish daily trend (low VIX)
+            if daily_trend_long and is_bear_signal and vix_val < VIX_THRESHOLD:
+                continue
+
+            # Adaptive Strategy Switching
+            is_trending = (vix_val < VIX_THRESHOLD)
+            if is_trending:
+                trade_dir = "LONG" if is_bull_signal else "SHORT"
+                strategy_used = "TREND_FOLLOW"
+            else:
+                trade_dir = "SHORT" if is_bull_signal else "LONG"
+                strategy_used = "MEAN_REVERSION"
+
+            # ── ML Walk-Forward 사이징 ───────────────────────────────────────
+            recent_wr5 = (sum(1 for t in trades[-5:] if t["pnl"] > 0)
+                          / max(len(trades[-5:]), 1))
+            _day_dt = datetime.strptime(day_str, "%Y-%m-%d")
+            ml_feat = WalkForwardML.features(
+                score=normalized, vix=vix_val, atr=atr_val,
+                price=spy_entry_price, direction=trade_dir,
+                date_dt=_day_dt, recent_wr5=recent_wr5,
+                consec_wins=consecutive_wins, consec_losses=consecutive_losses,
+                day_open=spy_o,
+            )
+            ml_conf = ml.predict(ml_feat)
+            ml.conf_history.append(round(ml_conf, 3))
+            if ml.should_skip():
+                continue  # ML hard filter: skip low-confidence trades
+            # ────────────────────────────────────────────────────────────────
+
+            # Position Sizing
+            if fixed_size:
+                num_contracts = FIXED_CONTRACTS
+            else:
+                max_risk_dollar = balance * RISK_PCT
+                risk_per_contract = (window_sl + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
+                num_contracts = int(max_risk_dollar / risk_per_contract)
+                if num_contracts == 0:
+                    num_contracts = 1
+                max_by_margin = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
+                if max_by_margin == 0:
+                    max_by_margin = 1
+                num_contracts = min(num_contracts, max_by_margin)
+                if num_contracts * ES_DAY_MARGIN > balance:
+                    continue
+
+            # ML 사이징 적용
+            if not fixed_size:
+                max_by_margin_ref = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
+                num_contracts = ml.apply_sizing(num_contracts, max_by_margin_ref)
+
+            # Minute-by-Minute Simulation
+            entry_price = spy_entry_price
+            tp_points = window_sl * TP_MULT
+            tp_target = entry_price + tp_points if trade_dir == "LONG" else entry_price - tp_points
+            sl_target = entry_price - window_sl if trade_dir == "LONG" else entry_price + window_sl
+            breakeven_activated = False
+            trailing_activated = False
+            best_price = entry_price
+
+            exit_price = None
             exit_type = "EOD"
+            exit_time_str = f"{EXIT_TIME.hour}:{EXIT_TIME.minute:02d}"
 
-        # -- P&L Calculation --
-        point_pnl = (exit_price - entry_price) if trade_dir == "LONG" else (entry_price - exit_price)
-        net_point_pnl = point_pnl - (ES_SLIPPAGE_PTS * 2)
-        gross_pnl = net_point_pnl * ES_MULTIPLIER * num_contracts
-        total_pnl = gross_pnl - (ES_COMMISSION_RT * num_contracts)
+            for ts_bar, o_bar, h_bar, l_bar, c_bar, v_bar in day_bars:
+                if ts_bar.time() <= entry_time:
+                    continue
+                if ts_bar.time() > EXIT_TIME:
+                    break
 
-        balance += total_pnl
-        if total_pnl > 0:
-            wins += 1
-            consecutive_wins += 1
-            consecutive_losses = 0
-            max_consec_wins = max(max_consec_wins, consecutive_wins)
-        else:
-            losses += 1
-            consecutive_losses += 1
-            consecutive_wins = 0
-            max_consec_losses = max(max_consec_losses, consecutive_losses)
-            if consecutive_losses >= LOCKOUT_STRIKES:
-                lockout_cooldown = LOCKOUT_DAYS
+                if trade_dir == "LONG":
+                    if h_bar > best_price:
+                        best_price = h_bar
+                    current_profit_pts = best_price - entry_price
+
+                    # Take-Profit check (before SL to prioritize gain locking)
+                    if h_bar >= tp_target:
+                        exit_price = tp_target
+                        exit_type = "TP"
+                        exit_time_str = ts_bar.strftime("%H:%M")
+                        break
+
+                    if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
+                        sl_target = entry_price + ES_SLIPPAGE_PTS
+                        breakeven_activated = True
+
+                    if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
+                        trailing_sl = best_price - TRAILING_STEP * atr_val
+                        if trailing_sl > sl_target:
+                            sl_target = trailing_sl
+                            trailing_activated = True
+
+                    if l_bar <= sl_target:
+                        exit_price = sl_target
+                        exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
+                        exit_time_str = ts_bar.strftime("%H:%M")
+                        break
+                else:  # SHORT
+                    if l_bar < best_price:
+                        best_price = l_bar
+                    current_profit_pts = entry_price - best_price
+
+                    # Take-Profit check
+                    if l_bar <= tp_target:
+                        exit_price = tp_target
+                        exit_type = "TP"
+                        exit_time_str = ts_bar.strftime("%H:%M")
+                        break
+
+                    if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
+                        sl_target = entry_price - ES_SLIPPAGE_PTS
+                        breakeven_activated = True
+
+                    if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
+                        trailing_sl = best_price + TRAILING_STEP * atr_val
+                        if trailing_sl < sl_target:
+                            sl_target = trailing_sl
+                            trailing_activated = True
+
+                    if h_bar >= sl_target:
+                        exit_price = sl_target
+                        exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
+                        exit_time_str = ts_bar.strftime("%H:%M")
+                        break
+
+            # EOD fallback exit
+            if exit_price is None:
+                eod_price = None
+                for bar_ts, bar_o, bar_h, bar_l, bar_c, bar_v in reversed(day_bars):
+                    if bar_ts.time() <= EXIT_TIME:
+                        eod_price = bar_c; break
+                if eod_price is None:
+                    eod_price = float(df_day["Close"].iloc[-1])
+                exit_price = eod_price
+                exit_type = "EOD"
+
+            # P&L Calculation
+            point_pnl = (exit_price - entry_price) if trade_dir == "LONG" else (entry_price - exit_price)
+            net_point_pnl = point_pnl - (ES_SLIPPAGE_PTS * 2)
+            gross_pnl = net_point_pnl * ES_MULTIPLIER * num_contracts
+            total_pnl = gross_pnl - (ES_COMMISSION_RT * num_contracts)
+
+            balance += total_pnl
+            if total_pnl > 0:
+                wins += 1
+                consecutive_wins += 1
                 consecutive_losses = 0
-            prev_balance = balance - total_pnl
-            if prev_balance > 0 and abs(total_pnl) / prev_balance >= 0.06:
-                lockout_cooldown = LOCKOUT_DAYS
+                max_consec_wins = max(max_consec_wins, consecutive_wins)
+            else:
+                losses += 1
+                consecutive_losses += 1
+                consecutive_wins = 0
+                max_consec_losses = max(max_consec_losses, consecutive_losses)
+                if consecutive_losses >= LOCKOUT_STRIKES:
+                    lockout_cooldown = LOCKOUT_DAYS
+                    consecutive_losses = 0
+                prev_balance = balance - total_pnl
+                if prev_balance > 0 and abs(total_pnl) / prev_balance >= 0.06:
+                    lockout_cooldown = LOCKOUT_DAYS
 
-        # Monthly tracking
-        month_key = day_str[:7]  # "YYYY-MM"
-        monthly_pnl[month_key] = monthly_pnl.get(month_key, 0) + total_pnl
-        daily_balance[day_str] = round(balance, 2)
+            # Monthly tracking
+            month_key = day_str[:7]
+            monthly_pnl[month_key] = monthly_pnl.get(month_key, 0) + total_pnl
+            daily_balance[day_str] = round(balance, 2)
 
-        trades.append({
-            "date": day_str,
-            "score": normalized,
-            "boosted_score": boosted_score,
-            "boost_reasons": ",".join(boost_reasons) if boost_reasons else "",
-            "direction": trade_dir,
-            "strategy": strategy_used,
-            "entry_price": round(entry_price, 2),
-            "exit_price": round(exit_price, 2),
-            "exit_type": exit_type,
-            "exit_time": exit_time_str,
-            "sl_points": round(sl_points, 2),
-            "atr": round(atr_val, 2),
-            "point_pnl": round(point_pnl, 2),
-            "contracts": num_contracts,
-            "pnl": round(total_pnl, 2),
-            "balance": round(balance, 2),
-            "vix": round(vix_val, 1)
-        })
+            trades.append({
+                "date": day_str,
+                "window": "GAMMA" if is_gamma else "PRIME",
+                "grade": grade,
+                "score": normalized,
+                "boosted_score": boosted_score,
+                "boost_reasons": ",".join(boost_reasons) if boost_reasons else "",
+                "direction": trade_dir,
+                "strategy": strategy_used,
+                "entry_price": round(entry_price, 2),
+                "exit_price": round(exit_price, 2),
+                "exit_type": exit_type,
+                "exit_time": exit_time_str,
+                "sl_points": round(window_sl, 2),
+                "atr": round(atr_val, 2),
+                "point_pnl": round(point_pnl, 2),
+                "contracts": num_contracts,
+                "pnl": round(total_pnl, 2),
+                "balance": round(balance, 2),
+                "vix": round(vix_val, 1),
+                "ml_confidence": round(ml_conf, 3),
+                "ml_active": ml.is_trained,
+            })
+
+            # ML 결과 학습 (거래 완료 후)
+            ml.update(ml_feat, won=(total_pnl > 0))
+
+            trades_today += 1
+            # Track exit time to prevent next window from entering while position open
+            try:
+                last_exit_time_today = datetime.strptime(exit_time_str, "%H:%M").time()
+            except Exception:
+                last_exit_time_today = EXIT_TIME
 
         pbar.set_postfix({"Bal": f"${balance:,.0f}", "WR": f"{wins/(wins+losses)*100 if wins+losses>0 else 0:.0f}%"})
 
@@ -603,6 +864,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     be_exits    = sum(1 for t in trades if t.get("exit_type") == "BE")
     sl_exits    = sum(1 for t in trades if t.get("exit_type") == "SL")
     eod_exits   = sum(1 for t in trades if t.get("exit_type") == "EOD")
+    tp_exits    = sum(1 for t in trades if t.get("exit_type") == "TP")
 
     long_wins  = sum(1 for t in trades if t["direction"] in ("LONG", "CALL")  and t["pnl"] > 0)
     long_total = sum(1 for t in trades if t["direction"] in ("LONG", "CALL"))
@@ -613,9 +875,16 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     print("\n" + "=" * 80)
     print("  MICRO E-MINI (MES) - PRO STRATEGY v4 RESULTS")
     print("=" * 80)
+    prime_cnt = sum(1 for t in trades if t.get("window") == "PRIME")
+    gamma_cnt = sum(1 for t in trades if t.get("window") == "GAMMA")
+    strong_cnt = sum(1 for t in trades if t.get("grade") == "STRONG")
+    moderate_cnt = sum(1 for t in trades if t.get("grade") == "MODERATE")
+
     print(f"  Period:            {start_str} ~ {end_str}  ({years:.1f}y)")
     print(f"  Product:           Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]")
     print(f"  Strategy:          ATR SL={ATR_SL_MULT}x + Trail + BE | Risk={RISK_PCT*100:.1f}%")
+    print(f"  Entry Windows:     PRIME(10:30)={prime_cnt} | GAMMA(14:00)={gamma_cnt}")
+    print(f"  Grade Breakdown:   STRONG(≥88)={strong_cnt} | MODERATE(≥{MIN_SCORE})={moderate_cnt}")
     print(f"  Pro Filters:       NR7 + 3Day Pullback + Gap + Daily Bias")
     print(f"  Starting Balance:  ${start_balance:,.2f}")
     print(f"  Final Balance:     ${balance:,.2f}")
@@ -637,7 +906,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     print(f"  Sortino Ratio:     {sortino:.2f}  (downside deviation)")
     print(f"  Calmar Ratio:      {calmar:.2f}  (annual / max-DD)")
     print(f"  ── Exit Types ─────────────────────────────────")
-    print(f"  Exit Types:        EOD={eod_exits} | SL={sl_exits} | TRAIL={trail_exits} | BE={be_exits}")
+    print(f"  Exit Types:        EOD={eod_exits} | TP={tp_exits} | SL={sl_exits} | TRAIL={trail_exits} | BE={be_exits}")
     print(f"  NR7 Boosted:       {nr7_trades} trades")
     print(f"  3Day PB Boosted:   {pb_trades} trades")
     print(f"  ── Monthly P&L ────────────────────────────────")
@@ -651,11 +920,18 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     print(f"  Running Time:      {time.time()-t_start:.1f}s")
     print("=" * 80)
 
+    sizing_label = f"FIXED {FIXED_CONTRACTS}계약" if fixed_size else f"DYNAMIC Risk={RISK_PCT*100:.1f}%"
     results = {
-        "model": "MES Futures Pro Strategy v4 (ATR+NR7+Pullback+Kelly, live params)",
+        "model": f"MES Futures Pro Strategy v9 (ML Walk-Forward · PRIME+REENTRY+GAMMA · STRONG≥88)",
         "period": f"{start_str} ~ {end_str}",
         "product": f"Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]",
-        "strategy": f"ATR SL={ATR_SL_MULT}x + 15:30 Exit | Risk={RISK_PCT*100:.1f}%",
+        "strategy": f"ATR SL={ATR_SL_MULT}x · TP={TP_MULT}xSL · MinScore={MIN_SCORE} · ML Walk-Forward",
+        "fixed_size": fixed_size,
+        "fixed_contracts": FIXED_CONTRACTS if fixed_size else None,
+        "prime_trades": prime_cnt,
+        "gamma_trades": gamma_cnt,
+        "strong_trades": strong_cnt,
+        "moderate_trades": moderate_cnt,
         "start_balance": start_balance,
         "end_balance": round(balance, 2),
         "total_pnl": round(total_pnl, 2),
@@ -680,13 +956,14 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         "sharpe_ratio": sharpe,
         "sortino_ratio": sortino,
         "calmar_ratio": calmar,
-        "exit_counts": {"EOD": eod_exits, "SL": sl_exits, "TRAIL": trail_exits, "BE": be_exits},
+        "exit_counts": {"EOD": eod_exits, "TP": tp_exits, "SL": sl_exits, "TRAIL": trail_exits, "BE": be_exits},
         "nr7_boosted_trades": nr7_trades,
         "pullback_boosted_trades": pb_trades,
         "monthly_pnl": {k: round(v, 2) for k, v in sorted(monthly_pnl.items())},
         "yearly_pnl": {k: round(v, 2) for k, v in sorted(yearly_pnl.items())},
         "daily_balance": daily_balance,
         "drawdown_series": [round(d, 2) for d in dd_series],
+        "ml_stats": ml.stats(),
         "trades": trades,
     }
 
@@ -700,10 +977,12 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="S&P 500 Futures (ES) Pro Strategy Backtest")
-    parser.add_argument("--csv", type=str, default="C:/Users/Gun_y/Desktop/SPY_1min_data.csv")
+    parser.add_argument("--csv", type=str, default="SPY_1min_synthetic.csv")
     parser.add_argument("--start", type=str, default="2023-03-25")
     parser.add_argument("--end", type=str, default="2026-03-25")
     parser.add_argument("--balance", type=float, default=10000.0)
+    parser.add_argument("--fixed-size", action="store_true",
+                        help="Use fixed contract count (no reinvestment effect)")
 
     args = parser.parse_args()
 
@@ -716,4 +995,5 @@ if __name__ == "__main__":
         start_str=args.start,
         end_str=args.end,
         start_balance=args.balance,
+        fixed_size=args.fixed_size,
     )
