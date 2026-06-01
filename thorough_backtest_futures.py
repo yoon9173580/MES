@@ -29,12 +29,24 @@ import sys
 import json
 import time
 import argparse
+import warnings
 from datetime import datetime, timedelta, time as dtime
 from typing import Optional, List, Dict
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import pytz
+warnings.filterwarnings("ignore")
+
+# ML imports
+try:
+    import lightgbm as lgb
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LogisticRegression
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    print("[!] ML libraries not found. pip install scikit-learn lightgbm")
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "api"))
 from engines.regime import calculate_regime_score
@@ -51,23 +63,22 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters v6 --
-# -- Strategy Parameters v6 --
-MIN_SCORE = 88              # STRONG 등급만 (검증된 WR 우위)
-RISK_PCT = 0.015            # 1.5% per-trade risk
-MARGIN_UTIL = 0.95          # 95% margin utilization allowed
-EXIT_TIME = dtime(15, 30)   # Exit at 15:30
-VIX_THRESHOLD = 20.0        # VIX < 20 = Trend Follow, >= 20 = Mean Reversion
-ADX_RUNAWAY = 40.0          # ADX runaway veto
-RSI_UPPER = 90.0            # RSI upper veto
-RSI_LOWER = 10.0            # RSI lower veto
-SECTOR_THRESHOLD = 1.8      # Sector breakout veto
-LOCKOUT_STRIKES = 2         # Consecutive losses before lockout (완화: 2→빠른 복귀)
-LOCKOUT_DAYS = 1            # Days to cool down (완화)
-ATR_SL_MULT = 1.5           # SL = 1.5x ATR(14) dynamic
-TP_MULT = 1.5               # Take-Profit = 1.5x SL (현실적 목표, R:R ≈ 1.5:1)
-TRAILING_ACTIVATION = 0.5   # Trail after 0.5x ATR profit (was 1.0)
-TRAILING_STEP = 0.25        # Trail 0.25x ATR behind peak (was 0.5)
-BREAKEVEN_AT = 0.25         # BE after 0.25x ATR profit (was 0.5)
+MIN_SCORE = 88              # STRONG 등급 유지 (v6 기반)
+RISK_PCT = 0.015
+MARGIN_UTIL = 0.95
+EXIT_TIME = dtime(15, 30)
+VIX_THRESHOLD = 20.0
+ADX_RUNAWAY = 40.0
+RSI_UPPER = 90.0
+RSI_LOWER = 10.0
+SECTOR_THRESHOLD = 1.8
+LOCKOUT_STRIKES = 2
+LOCKOUT_DAYS = 1
+ATR_SL_MULT = 1.5
+TP_MULT = 1.5               # TP = 1.5x SL
+TRAILING_ACTIVATION = 0.5
+TRAILING_STEP = 0.25
+BREAKEVEN_AT = 0.25
 
 # -- Dual Entry Windows --
 ENTRY_WINDOWS = [dtime(10, 30), dtime(14, 0)]   # PRIME (10:30) + GAMMA (14:00)
@@ -179,6 +190,155 @@ def check_daily_bias(daily_ohlc, trading_days, idx, spy_open):
     return True
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Walk-Forward ML System
+# ─────────────────────────────────────────────────────────────────────────────
+class WalkForwardML:
+    """
+    Walk-Forward ML 사이징 시스템.
+    - 진입 차단(필터링) 없음 — 사이징 조정만
+    - LightGBM (기본) / LogisticRegression (폴백)
+    - MIN_TRAIN 건 후 활성화, RETRAIN_N 건마다 재학습
+    - P(win) >= SIZE_HIGH  → 계약수 +30%
+    - P(win) >= SIZE_MED   → 계약수 +15%
+    - P(win) <  SIZE_LOW   → 계약수 -20%
+    """
+    MIN_TRAIN  = 15
+    RETRAIN_N  = 5
+    SIZE_HIGH  = 0.62   # +30%
+    SIZE_MED   = 0.55   # +15%
+    SIZE_LOW   = 0.44   # -20%
+
+    FEATURE_NAMES = [
+        "score_norm", "vix_norm", "atr_pct",
+        "is_long", "day_of_week", "month_norm",
+        "recent_wr5", "streak_norm",
+        "open_momentum", "vix_regime",
+    ]
+
+    def __init__(self):
+        self.X: List[List[float]] = []
+        self.y: List[int] = []
+        self.model = None
+        self.scaler = None
+        self.is_trained = False
+        self.n_since_retrain = 0
+        self.conf_history: List[float] = []
+        self.feature_importance: Dict[str, float] = {}
+
+    @staticmethod
+    def features(score: float, vix: float, atr: float, price: float,
+                 direction: str, date_dt, recent_wr5: float,
+                 consec_wins: int, consec_losses: int,
+                 day_open: float = 0.0) -> List[float]:
+        atr_pct    = min(atr / max(price, 1), 0.05) / 0.05
+        vix_norm   = min(vix, 40) / 40.0
+        streak     = (min(consec_wins, 5) - min(consec_losses, 5)) / 5.0
+        open_mom   = float(np.clip((price - day_open) / max(atr, 1), -2, 2) / 2.0)
+        vix_regime = float(np.clip(vix / max(atr * 0.4, 1), 0, 3) / 3.0)
+        return [
+            score / 100.0,
+            vix_norm,
+            atr_pct,
+            1.0 if direction == "LONG" else 0.0,
+            date_dt.weekday() / 4.0,
+            (date_dt.month - 1) / 11.0,
+            recent_wr5,
+            streak,
+            open_mom,
+            vix_regime,
+        ]
+
+    def predict(self, feat: List[float]) -> float:
+        if not self.is_trained or self.model is None:
+            return 0.5
+        try:
+            from sklearn.preprocessing import StandardScaler
+            X = self.scaler.transform(np.array(feat).reshape(1, -1))
+            return float(self.model.predict_proba(X)[0][1])
+        except Exception:
+            return 0.5
+
+    def update(self, feat: List[float], won: bool) -> None:
+        self.X.append(feat)
+        self.y.append(1 if won else 0)
+        self.n_since_retrain += 1
+        if len(self.X) >= self.MIN_TRAIN and self.n_since_retrain >= self.RETRAIN_N:
+            self._fit()
+
+    def _fit(self) -> None:
+        X = np.array(self.X)
+        y = np.array(self.y)
+        if len(np.unique(y)) < 2:
+            return
+        try:
+            from sklearn.preprocessing import StandardScaler
+            self.scaler = StandardScaler()
+            Xs = self.scaler.fit_transform(X)
+            if ML_AVAILABLE:
+                import lightgbm as lgb
+                params = dict(
+                    n_estimators=60, max_depth=3, learning_rate=0.1,
+                    num_leaves=7, min_child_samples=4, subsample=0.8,
+                    colsample_bytree=0.8, reg_lambda=1.5,
+                    objective="binary", verbose=-1, n_jobs=1,
+                    class_weight="balanced", random_state=42,
+                )
+                self.model = lgb.LGBMClassifier(**params)
+                self.model.fit(Xs, y)
+                imp = self.model.feature_importances_
+                total = max(float(imp.sum()), 1e-9)
+                self.feature_importance = {
+                    n: round(float(v) / total, 4)
+                    for n, v in zip(self.FEATURE_NAMES, imp)
+                }
+            else:
+                from sklearn.linear_model import LogisticRegression
+                self.model = LogisticRegression(C=0.3, max_iter=1000, random_state=42, class_weight="balanced")
+                self.model.fit(Xs, y)
+                coef = np.abs(self.model.coef_[0])
+                total = max(float(coef.sum()), 1e-9)
+                self.feature_importance = {
+                    n: round(float(v) / total, 4)
+                    for n, v in zip(self.FEATURE_NAMES, coef)
+                }
+            self.is_trained = True
+            self.n_since_retrain = 0
+        except Exception as e:
+            pass
+
+    def apply_sizing(self, num_contracts: int, max_contracts: int) -> int:
+        if not self.is_trained or not self.conf_history:
+            return num_contracts
+        conf = self.conf_history[-1]
+        if conf >= self.SIZE_HIGH:
+            return min(int(num_contracts * 1.30), max_contracts)
+        elif conf >= self.SIZE_MED:
+            return min(int(num_contracts * 1.15), max_contracts)
+        elif conf < self.SIZE_LOW:
+            return max(int(num_contracts * 0.80), 1)
+        return num_contracts
+
+    def stats(self) -> Dict:
+        if not self.y:
+            return {}
+        conf_arr = np.array(self.conf_history) if self.conf_history else np.array([0.5])
+        wins_in_high = sum(
+            1 for i, c in enumerate(self.conf_history)
+            if c >= self.SIZE_HIGH and i < len(self.y) and self.y[i] == 1
+        )
+        n_high = sum(1 for c in self.conf_history if c >= self.SIZE_HIGH)
+        return {
+            "total_predictions":  len(self.conf_history),
+            "training_samples":   len(self.X),
+            "avg_confidence":     round(float(conf_arr.mean()), 3),
+            "high_conf_wr":       round(wins_in_high / max(n_high, 1), 3),
+            "historical_wr":      round(sum(self.y) / max(len(self.y), 1), 3),
+            "feature_importance": self.feature_importance,
+            "confidence_series":  [round(c, 3) for c in self.conf_history],
+        }
+
+
 def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                          end_str: str = "2026-03-25",
                          start_balance: float = 10000.0,
@@ -247,6 +407,9 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
     lockout_cooldown = 0
     monthly_pnl: Dict[str, float] = {}    # "YYYY-MM" -> net P&L
     daily_balance: Dict[str, float] = {}  # "YYYY-MM-DD" -> closing balance
+
+    # ML Walk-Forward System 초기화
+    ml = WalkForwardML()
 
     pbar = tqdm(trading_days, desc="Backtesting Days")
 
@@ -407,6 +570,21 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 trade_dir = "SHORT" if is_bull_signal else "LONG"
                 strategy_used = "MEAN_REVERSION"
 
+            # ── ML Walk-Forward 사이징 ───────────────────────────────────────
+            recent_wr5 = (sum(1 for t in trades[-5:] if t["pnl"] > 0)
+                          / max(len(trades[-5:]), 1))
+            _day_dt = datetime.strptime(day_str, "%Y-%m-%d")
+            ml_feat = WalkForwardML.features(
+                score=normalized, vix=vix_val, atr=atr_val,
+                price=spy_entry_price, direction=trade_dir,
+                date_dt=_day_dt, recent_wr5=recent_wr5,
+                consec_wins=consecutive_wins, consec_losses=consecutive_losses,
+                day_open=spy_o,
+            )
+            ml_conf = ml.predict(ml_feat)
+            ml.conf_history.append(round(ml_conf, 3))
+            # ────────────────────────────────────────────────────────────────
+
             # Position Sizing
             if fixed_size:
                 num_contracts = FIXED_CONTRACTS
@@ -422,6 +600,11 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 num_contracts = min(num_contracts, max_by_margin)
                 if num_contracts * ES_DAY_MARGIN > balance:
                     continue
+
+            # ML 사이징 적용
+            if not fixed_size:
+                max_by_margin_ref = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
+                num_contracts = ml.apply_sizing(num_contracts, max_by_margin_ref)
 
             # Minute-by-Minute Simulation
             entry_price = spy_entry_price
@@ -556,8 +739,13 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 "contracts": num_contracts,
                 "pnl": round(total_pnl, 2),
                 "balance": round(balance, 2),
-                "vix": round(vix_val, 1)
+                "vix": round(vix_val, 1),
+                "ml_confidence": round(ml_conf, 3),
+                "ml_active": ml.is_trained,
             })
+
+            # ML 결과 학습 (거래 완료 후)
+            ml.update(ml_feat, won=(total_pnl > 0))
 
             trades_today += 1
 
@@ -699,10 +887,10 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
     sizing_label = f"FIXED {FIXED_CONTRACTS}계약" if fixed_size else f"DYNAMIC Risk={RISK_PCT*100:.1f}%"
     results = {
-        "model": f"MES Futures Pro Strategy v6 (TP={TP_MULT}xSL, Score≥{MIN_SCORE}, EarlyBE/Trail)",
+        "model": f"MES Futures Pro Strategy v7 (ML Walk-Forward Sizing + TP=1.5xSL, STRONG≥88)",
         "period": f"{start_str} ~ {end_str}",
         "product": f"Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]",
-        "strategy": f"ATR SL={ATR_SL_MULT}x · TP={TP_MULT}xSL · MinScore={MIN_SCORE} · {sizing_label}",
+        "strategy": f"ATR SL={ATR_SL_MULT}x · TP={TP_MULT}xSL · MinScore={MIN_SCORE} · ML Walk-Forward",
         "fixed_size": fixed_size,
         "fixed_contracts": FIXED_CONTRACTS if fixed_size else None,
         "prime_trades": prime_cnt,
@@ -740,6 +928,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         "yearly_pnl": {k: round(v, 2) for k, v in sorted(yearly_pnl.items())},
         "daily_balance": daily_balance,
         "drawdown_series": [round(d, 2) for d in dd_series],
+        "ml_stats": ml.stats(),
         "trades": trades,
     }
 

@@ -1,8 +1,8 @@
 {
-  "model": "MES Futures Pro Strategy v6 (TP=1.5xSL, Score\u226588, EarlyBE/Trail)",
+  "model": "MES Futures Pro Strategy v7 (ML Walk-Forward Sizing + TP=1.5xSL, STRONG\u226588)",
   "period": "2023-03-25 ~ 2026-03-25",
   "product": "Micro E-mini S&P 500 (MES) [$5/pt]",
-  "strategy": "ATR SL=1.5x \u00b7 TP=1.5xSL \u00b7 MinScore=88 \u00b7 DYNAMIC Risk=1.5%",
+  "strategy": "ATR SL=1.5x \u00b7 TP=1.5xSL \u00b7 MinScore=88 \u00b7 ML Walk-Forward",
   "fixed_size": false,
   "fixed_contracts": null,
   "prime_trades": 49,
@@ -10,10 +10,10 @@
   "strong_trades": 49,
   "moderate_trades": 0,
   "start_balance": 500000.0,
-  "end_balance": 506802.15,
-  "total_pnl": 6802.15,
-  "pnl_pct": 1.4,
-  "annual_return": 0.5,
+  "end_balance": 504595.15,
+  "total_pnl": 4595.15,
+  "pnl_pct": 0.9,
+  "annual_return": 0.3,
   "years": 2.85,
   "total_trades": 49,
   "wins": 22,
@@ -23,16 +23,16 @@
   "long_wins": 20,
   "short_trades": 5,
   "short_wins": 2,
-  "avg_win": 3813.48,
-  "avg_loss": -2855.35,
-  "rr_ratio": 1.34,
-  "profit_factor": 1.09,
-  "max_drawdown": 6.2,
+  "avg_win": 3640.95,
+  "avg_loss": -2796.51,
+  "rr_ratio": 1.3,
+  "profit_factor": 1.06,
+  "max_drawdown": 5.8,
   "max_consec_wins": 7,
   "max_consec_losses": 2,
-  "sharpe_ratio": -0.99,
-  "sortino_ratio": -0.98,
-  "calmar_ratio": 0.08,
+  "sharpe_ratio": -1.06,
+  "sortino_ratio": -1.03,
+  "calmar_ratio": 0.06,
   "exit_counts": {
     "EOD": 39,
     "TP": 4,
@@ -52,29 +52,29 @@
     "2023-11": -1021.25,
     "2024-04": 5291.25,
     "2024-05": -5083.2,
-    "2024-07": 1353.75,
-    "2024-08": 7315.0,
-    "2024-09": 14820.1,
-    "2024-11": 1351.35,
-    "2024-12": 85.0,
-    "2025-01": -7625.0,
-    "2025-02": 1749.5,
-    "2025-03": 10731.0,
-    "2025-06": 2686.6,
-    "2025-08": -176.75,
-    "2025-09": -14969.9,
-    "2025-10": 7029.1,
-    "2025-11": -13768.6,
-    "2025-12": -950.35,
-    "2026-01": 906.95,
-    "2026-02": -9779.5,
-    "2026-03": 10402.5
+    "2024-07": 1752.75,
+    "2024-08": 5852.0,
+    "2024-09": 11761.1,
+    "2024-11": 1747.2,
+    "2024-12": 108.8,
+    "2025-01": -6043.75,
+    "2025-02": 784.0,
+    "2025-03": 8541.0,
+    "2025-06": 2128.0,
+    "2025-08": -140.0,
+    "2025-09": -15408.3,
+    "2025-10": 8028.35,
+    "2025-11": -15418.2,
+    "2025-12": 865.7,
+    "2026-01": 710.6,
+    "2026-02": -8141.5,
+    "2026-03": 11826.0
   },
   "yearly_pnl": {
     "2023": -4566.65,
-    "2024": 25133.25,
-    "2025": -15294.4,
-    "2026": 1529.95
+    "2024": 21429.9,
+    "2025": -16663.2,
+    "2026": 4395.1
   },
   "daily_balance": {
     "2023-05-09": 499428.8,
@@ -92,40 +92,40 @@
     "2024-04-03": 490431.6,
     "2024-04-11": 500724.6,
     "2024-05-29": 495641.4,
-    "2024-07-22": 496995.15,
-    "2024-08-13": 504310.15,
-    "2024-09-13": 505850.95,
-    "2024-09-16": 508508.75,
-    "2024-09-30": 519130.25,
-    "2024-11-07": 520481.6,
-    "2024-12-23": 520566.6,
-    "2025-01-03": 520466.6,
-    "2025-01-10": 512941.6,
-    "2025-02-05": 512236.0,
-    "2025-02-06": 514955.5,
-    "2025-02-10": 513287.35,
-    "2025-02-13": 514943.55,
-    "2025-02-19": 514691.1,
-    "2025-03-19": 525422.1,
-    "2025-06-02": 529179.3,
-    "2025-06-24": 528108.7,
-    "2025-08-13": 527931.95,
-    "2025-09-02": 527755.2,
-    "2025-09-10": 519877.2,
-    "2025-09-15": 519406.95,
-    "2025-09-29": 512962.05,
-    "2025-10-01": 517033.95,
-    "2025-10-08": 520226.7,
-    "2025-10-23": 517956.7,
-    "2025-10-27": 519991.15,
-    "2025-11-05": 512269.15,
-    "2025-11-26": 506222.55,
-    "2025-12-10": 502037.0,
-    "2025-12-11": 505272.2,
-    "2026-01-13": 506179.15,
-    "2026-02-18": 498613.15,
-    "2026-02-25": 496399.65,
-    "2026-03-16": 506802.15
+    "2024-07-22": 497394.15,
+    "2024-08-13": 503246.15,
+    "2024-09-13": 504465.95,
+    "2024-09-16": 506575.75,
+    "2024-09-30": 515007.25,
+    "2024-11-07": 516754.45,
+    "2024-12-23": 516863.25,
+    "2025-01-03": 516764.25,
+    "2025-01-10": 510819.5,
+    "2025-02-05": 510257.9,
+    "2025-02-06": 512422.4,
+    "2025-02-10": 510535.2,
+    "2025-02-13": 511853.4,
+    "2025-02-19": 511603.5,
+    "2025-03-19": 520144.5,
+    "2025-06-02": 523120.5,
+    "2025-06-24": 522272.5,
+    "2025-08-13": 522132.5,
+    "2025-09-02": 521905.0,
+    "2025-09-10": 515665.0,
+    "2025-09-15": 515057.0,
+    "2025-09-29": 506724.2,
+    "2025-10-01": 511959.5,
+    "2025-10-08": 516055.25,
+    "2025-10-23": 513149.65,
+    "2025-10-27": 514752.55,
+    "2025-11-05": 507108.55,
+    "2025-11-26": 499334.35,
+    "2025-12-10": 496054.95,
+    "2025-12-11": 500200.05,
+    "2026-01-13": 500910.65,
+    "2026-02-18": 494982.65,
+    "2026-02-25": 492769.15,
+    "2026-03-16": 504595.15
   },
   "drawdown_series": [
     0.11,
@@ -143,7 +143,7 @@
     2.08,
     0.02,
     1.04,
-    0.77,
+    0.69,
     0.0,
     0.0,
     0.0,
@@ -151,33 +151,103 @@
     0.0,
     0.0,
     0.02,
-    1.46,
+    1.17,
+    1.28,
+    0.86,
+    1.22,
+    0.97,
+    1.02,
+    0.0,
+    0.0,
+    0.16,
+    0.19,
+    0.23,
+    1.43,
+    1.54,
+    3.13,
+    2.13,
+    1.35,
+    1.91,
     1.6,
-    1.08,
-    1.4,
-    1.08,
-    1.13,
-    0.0,
-    0.0,
-    0.2,
-    0.24,
-    0.27,
-    1.76,
-    1.85,
     3.06,
-    2.3,
-    1.69,
-    2.12,
-    1.74,
-    3.2,
-    4.34,
-    5.13,
-    4.52,
-    4.35,
-    5.78,
-    6.19,
-    4.23
+    4.55,
+    5.17,
+    4.38,
+    4.25,
+    5.38,
+    5.8,
+    3.54
   ],
+  "ml_stats": {
+    "total_predictions": 49,
+    "training_samples": 49,
+    "avg_confidence": 0.466,
+    "high_conf_wr": 0.545,
+    "historical_wr": 0.449,
+    "feature_importance": {
+      "score_norm": 0.1042,
+      "vix_norm": 0.1699,
+      "atr_pct": 0.0811,
+      "is_long": 0.0039,
+      "day_of_week": 0.0463,
+      "month_norm": 0.1042,
+      "recent_wr5": 0.027,
+      "streak_norm": 0.1274,
+      "open_momentum": 0.2008,
+      "vix_regime": 0.1351
+    },
+    "confidence_series": [
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.784,
+      0.212,
+      0.212,
+      0.212,
+      0.212,
+      0.737,
+      0.776,
+      0.546,
+      0.275,
+      0.238,
+      0.297,
+      0.566,
+      0.082,
+      0.474,
+      0.185,
+      0.071,
+      0.137,
+      0.282,
+      0.728,
+      0.369,
+      0.851,
+      0.839,
+      0.645,
+      0.842,
+      0.773,
+      0.303,
+      0.472,
+      0.668,
+      0.256,
+      0.679,
+      0.14,
+      0.393,
+      0.443,
+      0.615
+    ]
+  },
   "trades": [
     {
       "date": "2023-05-09",
@@ -198,7 +268,9 @@
       "contracts": 96,
       "pnl": -571.2,
       "balance": 499428.8,
-      "vix": 17.7
+      "vix": 17.7,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-05-26",
@@ -219,7 +291,9 @@
       "contracts": 96,
       "pnl": -1132.8,
       "balance": 498296.0,
-      "vix": 18.0
+      "vix": 18.0,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-06-13",
@@ -240,7 +314,9 @@
       "contracts": 95,
       "pnl": -1249.25,
       "balance": 497046.75,
-      "vix": 14.6
+      "vix": 14.6,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-07-06",
@@ -261,7 +337,9 @@
       "contracts": 95,
       "pnl": -166.25,
       "balance": 496880.5,
-      "vix": 15.4
+      "vix": 15.4,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-07-11",
@@ -282,7 +360,9 @@
       "contracts": 95,
       "pnl": 85.5,
       "balance": 496966.0,
-      "vix": 14.8
+      "vix": 14.8,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-08-07",
@@ -303,7 +383,9 @@
       "contracts": 95,
       "pnl": 693.5,
       "balance": 497659.5,
-      "vix": 15.8
+      "vix": 15.8,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-08-09",
@@ -324,7 +406,9 @@
       "contracts": 95,
       "pnl": 3182.5,
       "balance": 500842.0,
-      "vix": 16.0
+      "vix": 16.0,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-08-28",
@@ -345,7 +429,9 @@
       "contracts": 96,
       "pnl": -4406.4,
       "balance": 496435.6,
-      "vix": 15.1
+      "vix": 15.1,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-09-07",
@@ -366,7 +452,9 @@
       "contracts": 95,
       "pnl": -14.25,
       "balance": 496421.35,
-      "vix": 14.4
+      "vix": 14.4,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-09-25",
@@ -387,7 +475,9 @@
       "contracts": 95,
       "pnl": 2009.25,
       "balance": 498430.6,
-      "vix": 16.9
+      "vix": 16.9,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-10-16",
@@ -408,7 +498,9 @@
       "contracts": 95,
       "pnl": -1976.0,
       "balance": 496454.6,
-      "vix": 17.2
+      "vix": 17.2,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2023-11-06",
@@ -429,7 +521,9 @@
       "contracts": 95,
       "pnl": -1021.25,
       "balance": 495433.35,
-      "vix": 14.9
+      "vix": 14.9,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2024-04-03",
@@ -450,7 +544,9 @@
       "contracts": 95,
       "pnl": -5001.75,
       "balance": 490431.6,
-      "vix": 14.3
+      "vix": 14.3,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2024-04-11",
@@ -471,7 +567,9 @@
       "contracts": 94,
       "pnl": 10293.0,
       "balance": 500724.6,
-      "vix": 14.9
+      "vix": 14.9,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2024-05-29",
@@ -492,7 +590,9 @@
       "contracts": 96,
       "pnl": -5083.2,
       "balance": 495641.4,
-      "vix": 14.3
+      "vix": 14.3,
+      "ml_confidence": 0.5,
+      "ml_active": false
     },
     {
       "date": "2024-07-22",
@@ -510,10 +610,12 @@
       "sl_points": 15.0,
       "atr": 50.91,
       "point_pnl": 3.45,
-      "contracts": 95,
-      "pnl": 1353.75,
-      "balance": 496995.15,
-      "vix": 14.9
+      "contracts": 123,
+      "pnl": 1752.75,
+      "balance": 497394.15,
+      "vix": 14.9,
+      "ml_confidence": 0.784,
+      "ml_active": true
     },
     {
       "date": "2024-08-13",
@@ -531,10 +633,12 @@
       "sl_points": 15.0,
       "atr": 113.41,
       "point_pnl": 16.0,
-      "contracts": 95,
-      "pnl": 7315.0,
-      "balance": 504310.15,
-      "vix": 18.1
+      "contracts": 76,
+      "pnl": 5852.0,
+      "balance": 503246.15,
+      "vix": 18.1,
+      "ml_confidence": 0.212,
+      "ml_active": true
     },
     {
       "date": "2024-09-13",
@@ -552,10 +656,12 @@
       "sl_points": 15.0,
       "atr": 77.62,
       "point_pnl": 3.81,
-      "contracts": 96,
-      "pnl": 1540.8,
-      "balance": 505850.95,
-      "vix": 16.6
+      "contracts": 76,
+      "pnl": 1219.8,
+      "balance": 504465.95,
+      "vix": 16.6,
+      "ml_confidence": 0.212,
+      "ml_active": true
     },
     {
       "date": "2024-09-16",
@@ -573,10 +679,12 @@
       "sl_points": 15.0,
       "atr": 75.4,
       "point_pnl": 6.08,
-      "contracts": 97,
-      "pnl": 2657.8,
-      "balance": 508508.75,
-      "vix": 17.1
+      "contracts": 77,
+      "pnl": 2109.8,
+      "balance": 506575.75,
+      "vix": 17.1,
+      "ml_confidence": 0.212,
+      "ml_active": true
     },
     {
       "date": "2024-09-30",
@@ -594,10 +702,12 @@
       "sl_points": 15.0,
       "atr": 57.49,
       "point_pnl": 22.5,
-      "contracts": 97,
-      "pnl": 10621.5,
-      "balance": 519130.25,
-      "vix": 16.7
+      "contracts": 77,
+      "pnl": 8431.5,
+      "balance": 515007.25,
+      "vix": 16.7,
+      "ml_confidence": 0.212,
+      "ml_active": true
     },
     {
       "date": "2024-11-07",
@@ -615,10 +725,12 @@
       "sl_points": 15.0,
       "atr": 61.66,
       "point_pnl": 3.33,
-      "contracts": 99,
-      "pnl": 1351.35,
-      "balance": 520481.6,
-      "vix": 15.2
+      "contracts": 128,
+      "pnl": 1747.2,
+      "balance": 516754.45,
+      "vix": 15.2,
+      "ml_confidence": 0.737,
+      "ml_active": true
     },
     {
       "date": "2024-12-23",
@@ -636,10 +748,12 @@
       "sl_points": 15.0,
       "atr": 57.84,
       "point_pnl": 0.77,
-      "contracts": 100,
-      "pnl": 85.0,
-      "balance": 520566.6,
-      "vix": 16.8
+      "contracts": 128,
+      "pnl": 108.8,
+      "balance": 516863.25,
+      "vix": 16.8,
+      "ml_confidence": 0.776,
+      "ml_active": true
     },
     {
       "date": "2025-01-03",
@@ -657,10 +771,12 @@
       "sl_points": 15.0,
       "atr": 80.53,
       "point_pnl": 0.4,
-      "contracts": 100,
-      "pnl": -100.0,
-      "balance": 520466.6,
-      "vix": 16.1
+      "contracts": 99,
+      "pnl": -99.0,
+      "balance": 516764.25,
+      "vix": 16.1,
+      "ml_confidence": 0.546,
+      "ml_active": true
     },
     {
       "date": "2025-01-10",
@@ -678,10 +794,12 @@
       "sl_points": 15.0,
       "atr": 92.83,
       "point_pnl": -14.45,
-      "contracts": 100,
-      "pnl": -7525.0,
-      "balance": 512941.6,
-      "vix": 19.5
+      "contracts": 79,
+      "pnl": -5944.75,
+      "balance": 510819.5,
+      "vix": 19.5,
+      "ml_confidence": 0.275,
+      "ml_active": true
     },
     {
       "date": "2025-02-05",
@@ -699,10 +817,12 @@
       "sl_points": 15.0,
       "atr": 72.04,
       "point_pnl": -0.84,
-      "contracts": 98,
-      "pnl": -705.6,
-      "balance": 512236.0,
-      "vix": 15.8
+      "contracts": 78,
+      "pnl": -561.6,
+      "balance": 510257.9,
+      "vix": 15.8,
+      "ml_confidence": 0.238,
+      "ml_active": true
     },
     {
       "date": "2025-02-06",
@@ -720,10 +840,12 @@
       "sl_points": 15.0,
       "atr": 67.62,
       "point_pnl": 6.15,
-      "contracts": 98,
-      "pnl": 2719.5,
-      "balance": 514955.5,
-      "vix": 15.5
+      "contracts": 78,
+      "pnl": 2164.5,
+      "balance": 512422.4,
+      "vix": 15.5,
+      "ml_confidence": 0.297,
+      "ml_active": true
     },
     {
       "date": "2025-02-10",
@@ -741,10 +863,12 @@
       "sl_points": 15.0,
       "atr": 68.11,
       "point_pnl": -2.77,
-      "contracts": 99,
-      "pnl": -1668.15,
-      "balance": 513287.35,
-      "vix": 15.8
+      "contracts": 112,
+      "pnl": -1887.2,
+      "balance": 510535.2,
+      "vix": 15.8,
+      "ml_confidence": 0.566,
+      "ml_active": true
     },
     {
       "date": "2025-02-13",
@@ -762,10 +886,12 @@
       "sl_points": 15.0,
       "atr": 67.89,
       "point_pnl": 3.98,
-      "contracts": 98,
-      "pnl": 1656.2,
-      "balance": 514943.55,
-      "vix": 15.1
+      "contracts": 78,
+      "pnl": 1318.2,
+      "balance": 511853.4,
+      "vix": 15.1,
+      "ml_confidence": 0.082,
+      "ml_active": true
     },
     {
       "date": "2025-02-19",
@@ -783,10 +909,12 @@
       "sl_points": 15.0,
       "atr": 57.8,
       "point_pnl": 0.09,
-      "contracts": 99,
-      "pnl": -252.45,
-      "balance": 514691.1,
-      "vix": 15.3
+      "contracts": 98,
+      "pnl": -249.9,
+      "balance": 511603.5,
+      "vix": 15.3,
+      "ml_confidence": 0.474,
+      "ml_active": true
     },
     {
       "date": "2025-03-19",
@@ -804,10 +932,12 @@
       "sl_points": 15.0,
       "atr": 121.74,
       "point_pnl": 22.5,
-      "contracts": 98,
-      "pnl": 10731.0,
-      "balance": 525422.1,
-      "vix": 19.9
+      "contracts": 78,
+      "pnl": 8541.0,
+      "balance": 520144.5,
+      "vix": 19.9,
+      "ml_confidence": 0.185,
+      "ml_active": true
     },
     {
       "date": "2025-06-02",
@@ -825,10 +955,12 @@
       "sl_points": 15.0,
       "atr": 77.41,
       "point_pnl": 8.04,
-      "contracts": 101,
-      "pnl": 3757.2,
-      "balance": 529179.3,
-      "vix": 18.4
+      "contracts": 80,
+      "pnl": 2976.0,
+      "balance": 523120.5,
+      "vix": 18.4,
+      "ml_confidence": 0.071,
+      "ml_active": true
     },
     {
       "date": "2025-06-24",
@@ -846,10 +978,12 @@
       "sl_points": 15.0,
       "atr": 58.07,
       "point_pnl": -1.52,
-      "contracts": 101,
-      "pnl": -1070.6,
-      "balance": 528108.7,
-      "vix": 17.5
+      "contracts": 80,
+      "pnl": -848.0,
+      "balance": 522272.5,
+      "vix": 17.5,
+      "ml_confidence": 0.137,
+      "ml_active": true
     },
     {
       "date": "2025-08-13",
@@ -867,10 +1001,12 @@
       "sl_points": 15.0,
       "atr": 61.55,
       "point_pnl": 0.25,
-      "contracts": 101,
-      "pnl": -176.75,
-      "balance": 527931.95,
-      "vix": 14.5
+      "contracts": 80,
+      "pnl": -140.0,
+      "balance": 522132.5,
+      "vix": 14.5,
+      "ml_confidence": 0.282,
+      "ml_active": true
     },
     {
       "date": "2025-09-02",
@@ -888,10 +1024,12 @@
       "sl_points": 15.0,
       "atr": 47.73,
       "point_pnl": 0.25,
-      "contracts": 101,
-      "pnl": -176.75,
-      "balance": 527755.2,
-      "vix": 17.2
+      "contracts": 130,
+      "pnl": -227.5,
+      "balance": 521905.0,
+      "vix": 17.2,
+      "ml_confidence": 0.728,
+      "ml_active": true
     },
     {
       "date": "2025-09-10",
@@ -909,10 +1047,12 @@
       "sl_points": 15.0,
       "atr": 54.29,
       "point_pnl": -15.0,
-      "contracts": 101,
-      "pnl": -7878.0,
-      "balance": 519877.2,
-      "vix": 15.4
+      "contracts": 80,
+      "pnl": -6240.0,
+      "balance": 515665.0,
+      "vix": 15.4,
+      "ml_confidence": 0.369,
+      "ml_active": true
     },
     {
       "date": "2025-09-15",
@@ -930,10 +1070,12 @@
       "sl_points": 15.0,
       "atr": 47.54,
       "point_pnl": -0.35,
-      "contracts": 99,
-      "pnl": -470.25,
-      "balance": 519406.95,
-      "vix": 15.7
+      "contracts": 128,
+      "pnl": -608.0,
+      "balance": 515057.0,
+      "vix": 15.7,
+      "ml_confidence": 0.851,
+      "ml_active": true
     },
     {
       "date": "2025-09-29",
@@ -951,10 +1093,12 @@
       "sl_points": 15.0,
       "atr": 47.31,
       "point_pnl": -12.42,
-      "contracts": 99,
-      "pnl": -6444.9,
-      "balance": 512962.05,
-      "vix": 16.1
+      "contracts": 128,
+      "pnl": -8332.8,
+      "balance": 506724.2,
+      "vix": 16.1,
+      "ml_confidence": 0.839,
+      "ml_active": true
     },
     {
       "date": "2025-10-01",
@@ -972,10 +1116,12 @@
       "sl_points": 15.0,
       "atr": 47.69,
       "point_pnl": 8.91,
-      "contracts": 98,
-      "pnl": 4071.9,
-      "balance": 517033.95,
-      "vix": 16.3
+      "contracts": 126,
+      "pnl": 5235.3,
+      "balance": 511959.5,
+      "vix": 16.3,
+      "ml_confidence": 0.645,
+      "ml_active": true
     },
     {
       "date": "2025-10-08",
@@ -993,10 +1139,12 @@
       "sl_points": 15.0,
       "atr": 48.89,
       "point_pnl": 7.05,
-      "contracts": 99,
-      "pnl": 3192.75,
-      "balance": 520226.7,
-      "vix": 16.3
+      "contracts": 127,
+      "pnl": 4095.75,
+      "balance": 516055.25,
+      "vix": 16.3,
+      "ml_confidence": 0.842,
+      "ml_active": true
     },
     {
       "date": "2025-10-23",
@@ -1014,10 +1162,12 @@
       "sl_points": 15.0,
       "atr": 83.84,
       "point_pnl": -3.94,
-      "contracts": 100,
-      "pnl": -2270.0,
-      "balance": 517956.7,
-      "vix": 17.3
+      "contracts": 128,
+      "pnl": -2905.6,
+      "balance": 513149.65,
+      "vix": 17.3,
+      "ml_confidence": 0.773,
+      "ml_active": true
     },
     {
       "date": "2025-10-27",
@@ -1035,10 +1185,12 @@
       "sl_points": 15.0,
       "atr": 86.69,
       "point_pnl": 4.71,
-      "contracts": 99,
-      "pnl": 2034.45,
-      "balance": 519991.15,
-      "vix": 15.8
+      "contracts": 78,
+      "pnl": 1602.9,
+      "balance": 514752.55,
+      "vix": 15.8,
+      "ml_confidence": 0.303,
+      "ml_active": true
     },
     {
       "date": "2025-11-05",
@@ -1056,10 +1208,12 @@
       "sl_points": 15.0,
       "atr": 69.7,
       "point_pnl": -15.0,
-      "contracts": 99,
-      "pnl": -7722.0,
-      "balance": 512269.15,
-      "vix": 18.0
+      "contracts": 98,
+      "pnl": -7644.0,
+      "balance": 507108.55,
+      "vix": 18.0,
+      "ml_confidence": 0.472,
+      "ml_active": true
     },
     {
       "date": "2025-11-26",
@@ -1077,10 +1231,12 @@
       "sl_points": 15.0,
       "atr": 110.09,
       "point_pnl": -11.74,
-      "contracts": 98,
-      "pnl": -6046.6,
-      "balance": 506222.55,
-      "vix": 17.2
+      "contracts": 126,
+      "pnl": -7774.2,
+      "balance": 499334.35,
+      "vix": 17.2,
+      "ml_confidence": 0.668,
+      "ml_active": true
     },
     {
       "date": "2025-12-10",
@@ -1098,10 +1254,12 @@
       "sl_points": 15.0,
       "atr": 78.14,
       "point_pnl": -8.03,
-      "contracts": 97,
-      "pnl": -4185.55,
-      "balance": 502037.0,
-      "vix": 15.8
+      "contracts": 76,
+      "pnl": -3279.4,
+      "balance": 496054.95,
+      "vix": 15.8,
+      "ml_confidence": 0.256,
+      "ml_active": true
     },
     {
       "date": "2025-12-11",
@@ -1119,10 +1277,12 @@
       "sl_points": 15.0,
       "atr": 77.41,
       "point_pnl": 7.34,
-      "contracts": 96,
-      "pnl": 3235.2,
-      "balance": 505272.2,
-      "vix": 14.9
+      "contracts": 123,
+      "pnl": 4145.1,
+      "balance": 500200.05,
+      "vix": 14.9,
+      "ml_confidence": 0.679,
+      "ml_active": true
     },
     {
       "date": "2026-01-13",
@@ -1140,10 +1300,12 @@
       "sl_points": 15.0,
       "atr": 45.18,
       "point_pnl": 2.47,
-      "contracts": 97,
-      "pnl": 906.95,
-      "balance": 506179.15,
-      "vix": 16.0
+      "contracts": 76,
+      "pnl": 710.6,
+      "balance": 500910.65,
+      "vix": 16.0,
+      "ml_confidence": 0.14,
+      "ml_active": true
     },
     {
       "date": "2026-02-18",
@@ -1161,10 +1323,12 @@
       "sl_points": 15.0,
       "atr": 94.26,
       "point_pnl": -15.0,
-      "contracts": 97,
-      "pnl": -7566.0,
-      "balance": 498613.15,
-      "vix": 19.6
+      "contracts": 76,
+      "pnl": -5928.0,
+      "balance": 494982.65,
+      "vix": 19.6,
+      "ml_confidence": 0.393,
+      "ml_active": true
     },
     {
       "date": "2026-02-25",
@@ -1184,8 +1348,10 @@
       "point_pnl": -4.06,
       "contracts": 95,
       "pnl": -2213.5,
-      "balance": 496399.65,
-      "vix": 17.9
+      "balance": 492769.15,
+      "vix": 17.9,
+      "ml_confidence": 0.443,
+      "ml_active": true
     },
     {
       "date": "2026-03-16",
@@ -1203,10 +1369,12 @@
       "sl_points": 15.0,
       "atr": 101.38,
       "point_pnl": 22.5,
-      "contracts": 95,
-      "pnl": 10402.5,
-      "balance": 506802.15,
-      "vix": 23.5
+      "contracts": 108,
+      "pnl": 11826.0,
+      "balance": 504595.15,
+      "vix": 23.5,
+      "ml_confidence": 0.615,
+      "ml_active": true
     }
   ]
 }
