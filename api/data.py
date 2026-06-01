@@ -43,38 +43,32 @@ MAX_OPEN_TRADES  = 1        # Max 1 MES position simultaneously
 # ── Backtest Summary (embedded static data — no file read at runtime) ─
 BACKTEST_SUMMARY = {
     "mes_futures": {
-        # Measured 2026-05-25 from real Databento CME Globex MDP 3.0 MES.c.0
-        # OHLCV-1m data (3 years, 1,052,817 bars) via thorough_backtest_futures.py.
-        # CORRECTED: Now uses live MES params (multiplier=$5/pt, RISK_PCT=1.5%)
-        # Prior measurement used ES params (mult=$50, risk=12%) then naively
-        # divided dollars by 10 — that produced misleading 33.9% annual / 23.7%
-        # DD. Correct rerun shows much safer and more realistic numbers.
-        "model": "MES Futures v4 (Databento real CME data, live params)",
-        "period": "2023-03-25 ~ 2026-03-25",
-        "period_days": 1095,
-        "strategy": "ATR SL=1.5x + Trail + BE | Risk=1.5% | NR7/Pullback/Gap/Daily bias | MIN_SCORE=88 | 10:30 entry / 15:30 EOD",
-        "total_trades": 55,
-        "wins": 33,
-        "losses": 22,
-        "win_rate": 60.0,
-        "profit_factor": 2.58,
-        "avg_win_mes": 212.48,
-        "avg_loss_mes": -123.58,
-        "rr_realized": 1.72,
-        "max_drawdown_pct": 3.6,
-        "annual_return_pct": 12.6,
-        "total_pnl_pct": 42.9,
-        "by_year": {
-            "2023_partial": {"trades": 11, "wr": 63.6, "pnl_mes":  852},
-            "2024":         {"trades": 17, "wr": 58.8, "pnl_mes": 1410},
-            "2025":         {"trades": 22, "wr": 59.1, "pnl_mes": 1986},
-            "2026_partial": {"trades": 5,  "wr": 60.0, "pnl_mes":   45}
-        },
-        "exit_breakdown": {"EOD": 35, "SL": 17, "BE": 3, "TRAIL": 0},
+        # Measured 2026-06-01 from real Databento CME Globex GLBX.MDP3 MES.c.0
+        # OHLCV-1m data (2023-03-25 ~ 2026-05-29, 1,116,732 bars, 806 trading days)
+        # via thorough_backtest_futures.py v9 (PRIME+REENTRY+GAMMA windows, ML Walk-Forward).
+        "model": "MES Futures Pro Strategy v9 (ML Walk-Forward · PRIME+REENTRY+GAMMA · STRONG≥88)",
+        "period": "2023-03-25 ~ 2026-05-29",
+        "period_days": 1161,
+        "strategy": "ATR SL=1.5x · TP=1.5xSL · MinScore=88 (GAMMA≥83) · ML Walk-Forward · PRIME+REENTRY+GAMMA windows · MaxTrades=4/day",
+        "total_trades": 227,
+        "long_trades": 193,
+        "short_trades": 34,
+        "wins": 109,
+        "losses": 118,
+        "win_rate": 48.0,
+        "profit_factor": 1.07,
+        "avg_win_mes": 83.72,
+        "avg_loss_mes": -72.39,
+        "rr_realized": 1.16,
+        "max_drawdown_pct": 12.3,
+        "annual_return_pct": 1.8,
+        "total_pnl_pct": 5.8,
+        "sharpe_ratio": -0.32,
+        "entry_breakdown": {"PRIME": 85, "GAMMA": 142},
+        "exit_breakdown": {"EOD": 89, "TP": 46, "SL": 77, "TRAIL": 2, "BE": 13},
         "status": "ACTUAL",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex)",
-        "vs_prior_run": "Prior 'ACTUAL' values used ES mult/12% risk then /10 rescale — produced misleading 33.9% annual / 23.7% DD. Rerun with live MES@1.5% gives realistic 12.6% / 3.6% DD.",
-        "note": "Real Databento data + live params. $10k → $14,293 in 3yr. 60% WR, 2.58 PF, 1.72 R:R. MDD 3.6% means worst drawdown was a $360 loss on $10k. Conservative but compounds: $10k → ~$14k in 3yr."
+        "note": "Real Databento CME data. v9 expanded REENTRY+GAMMA windows increased trade count (227 vs 55 in v4) but degraded edge: 48% WR and Sharpe -0.32 vs v4's 60% WR. More trades ≠ better edge on real data."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022

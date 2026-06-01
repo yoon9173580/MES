@@ -17,6 +17,7 @@ data_cache/
 SPY_1min_data.csv
 *_1min_data.csv
 *_1min_synthetic.csv
+MES_1min_data_et_rth.csv
 backtest_v4.json
 backtest_futures.json
 
