@@ -136,10 +136,18 @@ GRADE_WEAK=70
 
 ### Run tests
 ```bash
-pytest                        # 74 unit tests, ~10 seconds
+pytest                        # 108 unit tests, ~10 seconds
 ```
 
 CI runs the same suite on every push to main (`.github/workflows/test.yml`).
+
+### Pre-push hook (run tests automatically before every push)
+A versioned git hook runs `pytest` before each push and aborts if anything fails —
+local protection that doesn't depend on GitHub Actions. Enable once per clone:
+```bash
+git config core.hooksPath .githooks
+```
+Override a single push (skip tests): `git push --no-verify`.
 
 ### Run backtest
 ```bash

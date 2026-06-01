@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Pre-push hook — run the test suite locally before allowing a push.
+#
+# Enable once per clone:
+#     git config core.hooksPath .githooks
+#
+# Override a single push (skip tests):
+#     git push --no-verify
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+echo "[pre-push] Running pytest (tests/)…"
+if ! python3 -m pytest tests/ -q; then
+    echo ""
+    echo "[pre-push] ❌ Tests failed — push aborted."
+    echo "[pre-push]    Fix the failures, or override with: git push --no-verify"
+    exit 1
+fi
+
+echo "[pre-push] ✅ All tests passed — pushing."
