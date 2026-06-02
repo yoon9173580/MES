@@ -22,6 +22,8 @@ backtest_v4.json
 backtest_futures.json
 backtest_v4_real.json
 backtest_v9_real.json
+backtest_v10_verify.json
+backtest_v10_real.json
 
 # Environments
 .venv/
