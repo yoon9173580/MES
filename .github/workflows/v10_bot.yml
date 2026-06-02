@@ -1,0 +1,87 @@
+name: MES v10 Paper Bot
+
+# v10 strategy: single 10:30 ET PRIME entry, MIN_SCORE 88, TP=2.5×SL,
+# EOD flatten at 15:35 ET. Dual UTC crons per phase cover EDT/EST; the
+# bot's own ET time-gate ensures only the DST-correct tick acts, and a
+# one-trade-per-day lock (committed v10_state.json) prevents duplicates.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Force mode (entry/flatten); blank = auto by UTC hour"
+        required: false
+        default: ""
+  schedule:
+    # ENTRY — 10:30 ET  → 14:30 UTC (EDT) / 15:30 UTC (EST)
+    - cron: "30 14 * * 1-5"
+    - cron: "30 15 * * 1-5"
+    # FLATTEN — 15:35 ET → 19:35 UTC (EDT) / 20:35 UTC (EST)
+    - cron: "35 19 * * 1-5"
+    - cron: "35 20 * * 1-5"
+
+concurrency:
+  group: v10-bot
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy pytz requests
+
+      - name: Decide mode
+        id: mode
+        run: |
+          FORCED="${{ github.event.inputs.mode }}"
+          if [ -n "$FORCED" ]; then
+            echo "mode=$FORCED" >> "$GITHUB_OUTPUT"
+          else
+            H=$(date -u +%H)
+            if [ "$H" = "14" ] || [ "$H" = "15" ]; then
+              echo "mode=entry" >> "$GITHUB_OUTPUT"
+            else
+              echo "mode=flatten" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Run v10 bot (${{ steps.mode.outputs.mode }})
+        env:
+          BROKER: ${{ vars.BROKER || 'dryrun' }}
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          TRADOVATE_USERNAME: ${{ secrets.TRADOVATE_USERNAME }}
+          TRADOVATE_PASSWORD: ${{ secrets.TRADOVATE_PASSWORD }}
+          TRADOVATE_CID: ${{ secrets.TRADOVATE_CID }}
+          TRADOVATE_SEC: ${{ secrets.TRADOVATE_SEC }}
+          TRADOVATE_DEMO: ${{ vars.TRADOVATE_DEMO || 'true' }}
+        run: python trading_bot.py --once "${{ steps.mode.outputs.mode }}"
+
+      - name: Commit state + paper log
+        run: |
+          git config --global user.name "v10-bot"
+          git config --global user.email "actions@github.com"
+          git add v10_state.json v10_paper_log.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No state changes to commit."
+          else
+            git commit -m "v10 bot: ${{ steps.mode.outputs.mode }} $(date -u +%Y-%m-%dT%H:%MZ)"
+            for i in 1 2 3 4; do
+              git push && break
+              echo "push failed, retry $i"; git pull --rebase --autostash; sleep $((2**i))
+            done
+          fi
