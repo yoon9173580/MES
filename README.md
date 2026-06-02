@@ -167,27 +167,45 @@ python walk_forward_backtest.py --csv MES_1min_data_et_rth.csv
 python download_mes_data.py --start 2022-01-03 --end 2026-12-31
 ```
 
-### Live v10 Paper Bot (GitHub Actions)
+### Live v10 Paper Bot
 
-`trading_bot.py --once entry|flatten` runs a single v10 tick and exits — designed
-for cron scheduling rather than a long-running loop. The workflow
-`.github/workflows/v10_bot.yml` runs it automatically:
+The v10 single-tick logic lives in `api/v10_runner.py` (`run_once_entry` /
+`run_once_flatten`) and is driven by **two interchangeable schedulers**. Both
+share the same code; pick whichever fits your infra.
 
-| Phase   | ET time   | UTC crons (DST-safe)      | Action                              |
-|---------|-----------|---------------------------|-------------------------------------|
-| Entry   | 10:30     | 14:30 (EDT) / 15:30 (EST) | One v10 entry if score≥88 + bias    |
-| Flatten | 15:35     | 19:35 (EDT) / 20:35 (EST) | Close open positions at EOD         |
+**v10 entry gate:** RTH + score ≥ 88 + bias LONG/SHORT + regime ATR% ≥ 0.3
+("dead-market" guard). SL = 1.5×ATR, **TP = 2.5×SL** (the robust v10 lever).
+A one-trade-per-day lock prevents duplicate entries, and every tick appends an
+audit record (ENTRY / NO_ENTRY+reasons / NO_DATA / FLATTEN).
 
-The bot gates on actual ET time so only the DST-correct cron acts; a
-one-trade-per-day lock (`v10_state.json`, committed back by the workflow)
-prevents duplicate entries. Every tick appends an audit record to
-`v10_paper_log.json` (ENTRY / NO_ENTRY+reasons / NO_DATA / FLATTEN).
+#### Option 1 — Vercel Cron (default; no extra infra)
 
-**Broker:** defaults to `dryrun` (logs intended orders, no real fills — safe for
-signal validation). For real paper futures fills, set repo variable
-`BROKER=tradovate` and add `TRADOVATE_*` secrets (demo account by default).
-Market data needs `APCA_API_KEY_ID`/`APCA_API_SECRET_KEY` (+ `POLYGON_API_KEY`
-fallback) as repo secrets.
+`api/cron_v10.py` is hit on schedule by `vercel.json` `crons`. State + audit log
+persist in **Upstash KV** (`v10:state` / `v10:log`), since Vercel functions are
+ephemeral.
+
+| Phase   | ET time            | UTC cron      | Notes                                  |
+|---------|--------------------|---------------|----------------------------------------|
+| Entry   | 11:00 EDT/10:00 EST| `0 15 * * 1-5`| both land in the [10:00, 12:00] window |
+| Flatten | 16:30 EDT/15:30 EST| `30 20 * * 1-5`| at/after the 15:35 ET EOD             |
+
+Two crons fits the Vercel Hobby limit. Required env (Vercel project settings):
+`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (state), `APCA_API_KEY_ID`
++ `APCA_API_SECRET_KEY` (+ optional `POLYGON_API_KEY`) for market data, and
+`CRON_SECRET` to authenticate cron calls. `BROKER` defaults to `dryrun`.
+
+```bash
+# Manually trigger a tick (when CRON_SECRET is set)
+curl -H "Authorization: Bearer $CRON_SECRET" \
+     "https://hannaealgo.vercel.app/api/cron_v10?mode=entry"
+```
+
+#### Option 2 — GitHub Actions
+
+`.github/workflows/v10_bot.yml` runs `python trading_bot.py --once entry|flatten`
+on dual DST-safe crons, committing `v10_state.json` / `v10_paper_log.json` back
+to the repo. (Currently blocked by an account-level Actions billing issue — see
+Vercel Cron above as the working path.)
 
 ```bash
 # Manual single tick (local)
@@ -195,10 +213,14 @@ BROKER=dryrun python trading_bot.py --once entry
 BROKER=dryrun python trading_bot.py --once flatten
 ```
 
-> Note: the live bot replicates v10's robust lever (TP=2.5×SL, MIN_SCORE 88,
-> single 10:30 entry) but uses a "dead-market" volatility guard (regime
-> ATR% ≥ 0.3) instead of the backtest's exact `ATR>8` filter — that filter
-> removed only 1 of 35 backtest trades and is too overfit to trust live.
+**Broker:** `dryrun` logs intended orders (no real fills — safe for signal
+validation). For real paper futures fills set `BROKER=tradovate` + `TRADOVATE_*`
+creds (demo by default).
+
+> Note: the live bot uses a "dead-market" volatility guard (regime ATR% ≥ 0.3)
+> instead of the backtest's exact `ATR>8` filter — that filter removed only 1 of
+> 35 backtest trades and is too overfit to trust live. The robust lever
+> (TP=2.5×SL) is fully replicated.
 
 ---
 
