@@ -40,7 +40,7 @@ NY = pytz.timezone("America/New_York")
 
 V10_STATE_FILE = "v10_state.json"
 V10_LOG_FILE = "v10_paper_log.json"
-V10_LOG_CAP = 400
+V10_LOG_CAP = 1000
 
 V10_MIN_SCORE = 88
 V10_SHORT_MIN_SCORE = 88

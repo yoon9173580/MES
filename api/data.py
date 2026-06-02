@@ -1994,9 +1994,9 @@ class handler(BaseHTTPRequestHandler):
                 if yday_peak and yday_peak.get("minute"):
                     dp = portfolio.setdefault("daily_peaks", [])
                     dp.append(yday_peak)
-                    # Keep last 90 days (~4 months) of peaks
-                    if len(dp) > 90:
-                        portfolio["daily_peaks"] = dp[-90:]
+                    # Keep last 252 days (1 trading year) of peaks
+                    if len(dp) > 252:
+                        portfolio["daily_peaks"] = dp[-252:]
                 # Reset only the *internal* today-tracker (used to compute
                 # daily snapshot). score_samples + peak_score persist.
                 portfolio["peak_score_today_internal"] = {
@@ -2090,9 +2090,9 @@ class handler(BaseHTTPRequestHandler):
                         "bias":   direction_bias,
                         "reason": entry_reason if not entry_passed else "ENTRY_OK",
                     })
-                    # Cap at 2000 entries (~5 trading days), rolling
-                    if len(samples) > 2000:
-                        portfolio["score_samples"] = samples[-2000:]
+                    # Cap at 5000 entries (~13 trading days), rolling
+                    if len(samples) > 5000:
+                        portfolio["score_samples"] = samples[-5000:]
 
                 # All-time peak tracker
                 peak = portfolio.setdefault("peak_score",
@@ -2520,7 +2520,7 @@ class handler(BaseHTTPRequestHandler):
                 # Heavy diagnostic fields (score_samples, daily_peaks) are
                 # excluded — their summarized stats are already in
                 # entry_diagnostic. Saves ~256 KB per response when buffer
-                # is full (2000 samples × ~130 bytes/sample).
+                # is full (5000 samples × ~130 bytes/sample).
                 "paper_trading": {k: v for k, v in portfolio.items()
                                   if not k.startswith("_")
                                   and k not in ("storage_type", "revision", "last_saved",
