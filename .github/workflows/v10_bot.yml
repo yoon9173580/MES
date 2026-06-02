@@ -5,6 +5,11 @@ name: MES v10 Paper Bot
 # bot's own ET time-gate ensures only the DST-correct tick acts, and a
 # one-trade-per-day lock (committed v10_state.json) prevents duplicates.
 
+# NOTE: schedule removed — the live v10 scheduler now runs on Vercel Cron
+# (/api/cron_v10, see vercel.json), so this workflow is redundant. It also
+# could never run here anyway: the account's Actions are billing-blocked
+# (runner_id=0, ~2s fail). Kept as a manual fallback (workflow_dispatch) for
+# when Actions billing is restored.
 on:
   workflow_dispatch:
     inputs:
@@ -12,13 +17,6 @@ on:
         description: "Force mode (entry/flatten); blank = auto by UTC hour"
         required: false
         default: ""
-  schedule:
-    # ENTRY — 10:30 ET  → 14:30 UTC (EDT) / 15:30 UTC (EST)
-    - cron: "30 14 * * 1-5"
-    - cron: "30 15 * * 1-5"
-    # FLATTEN — 15:35 ET → 19:35 UTC (EDT) / 20:35 UTC (EST)
-    - cron: "35 19 * * 1-5"
-    - cron: "35 20 * * 1-5"
 
 concurrency:
   group: v10-bot

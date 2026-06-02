@@ -6,8 +6,11 @@ name: SPY 0DTE IC Daily Signal Check
 # For LIVE 10:30 ET entry signals, use Pine v3-0 on TradingView chart (realtime).
 on:
   workflow_dispatch:  # manual trigger from GitHub UI
-  schedule:
-    - cron: '30 21 * * 1-5'  # 17:30 EDT / 16:30 EST, Mon-Fri
+  # schedule disabled — account Actions are billing-blocked (runner_id=0, ~2s
+  # fail, zero logs), so the daily cron only produced red-X noise. Re-enable
+  # the cron below once Actions billing is restored.
+  # schedule:
+  #   - cron: '30 21 * * 1-5'  # 17:30 EDT / 16:30 EST, Mon-Fri
 
 jobs:
   check-ic-signal:
