@@ -7,11 +7,28 @@
       "config": { "maxLambdaSize": "50mb" }
     },
     {
+      "src": "api/cron_v10.py",
+      "use": "@vercel/python",
+      "config": { "maxLambdaSize": "50mb" }
+    },
+    {
       "src": "index.html",
       "use": "@vercel/static"
     }
   ],
+  "crons": [
+    { "path": "/api/cron_v10?mode=entry",   "schedule": "0 15 * * 1-5" },
+    { "path": "/api/cron_v10?mode=flatten", "schedule": "30 20 * * 1-5" }
+  ],
   "routes": [
+    {
+      "src": "/api/cron_v10",
+      "dest": "/api/cron_v10.py",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin"
+      }
+    },
     {
       "src": "/api/data",
       "dest": "/api/data.py",
