@@ -1,10 +1,11 @@
 name: tests
 
+# NOTE: push/pull_request triggers removed — the GitHub account's Actions are
+# blocked at the billing level (runners never allocate: runner_id=0, ~2s fail,
+# zero logs), so every auto-run produced a red X for no signal. Test coverage
+# is provided locally by the pre-push hook (runs pytest before each push).
+# Re-add the triggers below once Actions billing is restored.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
