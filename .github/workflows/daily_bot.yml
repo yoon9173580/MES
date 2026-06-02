@@ -1,9 +1,11 @@
 name: SPY 0DTE Signal Machine
 
+# DISABLED 2026-06-02: legacy SPY 0DTE signal script (find_trigger.py),
+# superseded by the v10 MES bot (.github/workflows/v10_bot.yml). The
+# scheduled trigger was removed because every run was failing and only
+# generated noise. Kept as manual-dispatch-only for archival/debug.
 on:
-  workflow_dispatch: 
-  schedule:
-    - cron: '*/5 13-21 * * 1-5' 
+  workflow_dispatch:
 
 jobs:
   build:
