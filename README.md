@@ -167,6 +167,39 @@ python walk_forward_backtest.py --csv MES_1min_data_et_rth.csv
 python download_mes_data.py --start 2022-01-03 --end 2026-12-31
 ```
 
+### Live v10 Paper Bot (GitHub Actions)
+
+`trading_bot.py --once entry|flatten` runs a single v10 tick and exits — designed
+for cron scheduling rather than a long-running loop. The workflow
+`.github/workflows/v10_bot.yml` runs it automatically:
+
+| Phase   | ET time   | UTC crons (DST-safe)      | Action                              |
+|---------|-----------|---------------------------|-------------------------------------|
+| Entry   | 10:30     | 14:30 (EDT) / 15:30 (EST) | One v10 entry if score≥88 + bias    |
+| Flatten | 15:35     | 19:35 (EDT) / 20:35 (EST) | Close open positions at EOD         |
+
+The bot gates on actual ET time so only the DST-correct cron acts; a
+one-trade-per-day lock (`v10_state.json`, committed back by the workflow)
+prevents duplicate entries. Every tick appends an audit record to
+`v10_paper_log.json` (ENTRY / NO_ENTRY+reasons / NO_DATA / FLATTEN).
+
+**Broker:** defaults to `dryrun` (logs intended orders, no real fills — safe for
+signal validation). For real paper futures fills, set repo variable
+`BROKER=tradovate` and add `TRADOVATE_*` secrets (demo account by default).
+Market data needs `APCA_API_KEY_ID`/`APCA_API_SECRET_KEY` (+ `POLYGON_API_KEY`
+fallback) as repo secrets.
+
+```bash
+# Manual single tick (local)
+BROKER=dryrun python trading_bot.py --once entry
+BROKER=dryrun python trading_bot.py --once flatten
+```
+
+> Note: the live bot replicates v10's robust lever (TP=2.5×SL, MIN_SCORE 88,
+> single 10:30 entry) but uses a "dead-market" volatility guard (regime
+> ATR% ≥ 0.3) instead of the backtest's exact `ATR>8` filter — that filter
+> removed only 1 of 35 backtest trades and is too overfit to trust live.
+
 ---
 
 ## File Structure
