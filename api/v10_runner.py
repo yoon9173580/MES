@@ -46,7 +46,7 @@ V10_MIN_SCORE = 60
 V10_SHORT_MIN_SCORE = 60
 V10_SL_ATR_MULT = 1.5
 V10_TP_MULT = 2.5
-V10_ATR_PCT_FLOOR = 0.3
+V10_ATR_ES_FLOOR = 8.0   # matches backtest --atr-min 8.0 (ES points, not %)
 ES_PER_SPY = 10.0
 
 
@@ -188,8 +188,8 @@ def run_once_entry(now=None, store=None):
         reasons.append(f"bias {bias}")
     if bias == "SHORT" and total_score < V10_SHORT_MIN_SCORE:
         reasons.append("SHORT conviction")
-    if atr_pct is not None and atr_pct < V10_ATR_PCT_FLOOR:
-        reasons.append(f"dead market atr%={atr_pct:.2f}")
+    if ctx["atr_es"] < V10_ATR_ES_FLOOR:
+        reasons.append(f"dead market atr_es={ctx['atr_es']:.1f} < {V10_ATR_ES_FLOOR}")
 
     if reasons:
         logger.info(f"No entry — {'; '.join(reasons)}")
