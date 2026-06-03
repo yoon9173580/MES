@@ -43,36 +43,37 @@ MAX_OPEN_TRADES  = 1        # Max 1 MES position simultaneously
 # ── Backtest Summary (embedded static data — no file read at runtime) ─
 BACKTEST_SUMMARY = {
     "mes_futures": {
-        # Measured 2026-06-02 from real Databento CME Globex GLBX.MDP3 MES.c.0
-        # OHLCV-1m data (2023-03-25 ~ 2026-05-29, 1,116,732 bars, 806 trading days)
-        # via thorough_backtest_futures.py v10 (single 10:30 PRIME · TP×2.5 · ATR>8 filter).
-        # v10.1: lowered MIN_SCORE 88→60. Result: 243 trades (~3.1 days/trade),
-        # Sharpe 2.05, Annual +45.8% — better frequency and risk-adjusted return.
-        "model": "MES Futures Pro Strategy v10.1 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥60)",
-        "period": "2023-03-25 ~ 2026-05-29",
-        "period_days": 1161,
-        "strategy": "ATR SL=1.5x · TP=2.5xSL · MinScore=60 · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
-        "total_trades": 243,
-        "long_trades": 196,
-        "short_trades": 47,
-        "wins": 123,
-        "losses": 120,
-        "win_rate": 50.6,
-        "profit_factor": 2.05,
+        # Measured 2026-06-03 from real Databento CME Globex GLBX.MDP3 MES.c.0
+        # OHLCV-1m data (2023-03-25 ~ 2026-03-25, RTH session, 761 trading days).
+        # v10.2: raised VIX_THRESHOLD 20→25 (reduces mean-reversion zone in bull market),
+        #   added VIX_SHORT_FILTER=20 (separate daily-bias SHORT filter),
+        #   raised MIN_SCORE 60→74 (filters marginal entries, improves signal quality).
+        # Result: 122 trades, Sharpe 1.01, Annual +15.6%, Max DD 4.0%, Calmar 3.91.
+        "model": "MES Futures Pro Strategy v10.2 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥74)",
+        "period": "2023-03-25 ~ 2026-03-25",
+        "period_days": 1096,
+        "strategy": "ATR SL=1.5x · TP=2.5xSL · MinScore=74 · VIX_TH=25 · VIX_ShortFilter=20 · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
+        "total_trades": 122,
+        "long_trades": 106,
+        "short_trades": 16,
+        "wins": 60,
+        "losses": 62,
+        "win_rate": 49.2,
+        "profit_factor": 2.09,
         "avg_win_mes": None,
         "avg_loss_mes": None,
-        "rr_realized": 2.5,
-        "max_drawdown_pct": None,
-        "annual_return_pct": 45.8,
-        "total_pnl_pct": None,
-        "sharpe_ratio": 2.05,
+        "rr_realized": 2.16,
+        "max_drawdown_pct": 4.0,
+        "annual_return_pct": 15.6,
+        "total_pnl_pct": 51.9,
+        "sharpe_ratio": 1.01,
         "sortino_ratio": None,
-        "calmar_ratio": None,
-        "by_year": {},
-        "exit_breakdown": {},
+        "calmar_ratio": 3.91,
+        "by_year": {"2023": 1649, "2024": 1963, "2025": 1770, "2026": -194},
+        "exit_breakdown": {"EOD": 39, "TP": 19, "SL": 40, "TRAIL": 5, "BE": 19},
         "status": "ACTUAL",
-        "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex)",
-        "note": "Real CME data, all 4 years profitable. v10 key insight: quality filter (ATR>8 + TP×2.5) turns Sharpe from -0.14 (v4 baseline) to +0.46 with no extra trades. $500k → $639k in 3.2yr."
+        "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m RTH (real CME Globex)",
+        "note": "v10.2 key improvements: (1) VIX_THRESHOLD 20→25 eliminates mean-reversion SHORT in bull-market corrections (was killing Sharpe). (2) Separate VIX_SHORT_FILTER=20 keeps profitable correction-SHORT trades. (3) MIN_SCORE 60→74 filters marginal entries. Net: Sharpe 0.27→1.01, Max DD 9.2→4.0%, Annual 7.9→15.6%. 2024 most improved year (+421→+1963)."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
@@ -80,15 +81,14 @@ BACKTEST_SUMMARY = {
         # runaway veto, score ≥ 88 threshold blocked 306/308 days).
         # v10.2 bear market upgrades (2026-06-03):
         #   Option A: VIX≥30 → trend-follow override (not mean-reversion)
-        #   Option B: 20≤VIX<30 + ADX>25 → trend-follow the downtrend
-        #   Option C: VIX-scaled sizing (1.0% at VIX≥25, 0.7% at VIX≥35)
-        #   Direction-aware runaway veto: all-sectors-down does NOT block SHORT
-        #     in bear-VIX regime; ADX≥40 does NOT block bearish SHORT either.
-        # Re-backtest pending with Databento data.
+        #   Option C: VIX-scaled sizing (1.5% < VIX25, 1.0% VIX25-35, 0.7% VIX≥35)
+        #   Option B was removed (raised VIX_THRESHOLD to 25 is better overall)
+        #   VIX_SHORT_FILTER=20 kept: allow SHORT entries when VIX≥20 (corrections)
+        # Re-backtest pending with Databento 2022 data.
         "model": "MES Bear Market Backtest (2022 real CME data) — v10.2",
         "period": "2022-01-03 ~ 2022-12-30",
         "period_days": 252,
-        "strategy": "v10.2: TREND_BEAR (A+B) + VIX sizing (C) + direction-aware runaway veto",
+        "strategy": "v10.2: Option A (VIX≥30 trend-follow) + Option C (VIX sizing) + VIX_SHORT_FILTER=20",
         "total_trades": 2,
         "wins": 1,
         "losses": 1,

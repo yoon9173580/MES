@@ -36,10 +36,12 @@ except ImportError:  # imported as api.v10_strategy from repo root
 ATR_SL_MULT = 1.5            # SL = 1.5 × ATR
 TP_MULT = 2.5               # TP = 2.5 × SL  (v10 lever)
 ATR_MIN = 8.0               # skip days whose 14-day ATR < 8 points
-MIN_SCORE = 60              # v10.1 entry threshold (was 88)
-VIX_THRESHOLD = 20.0        # below → trend-follow, at/above → mean-reversion
+MIN_SCORE = 74              # v10.2 entry threshold (optimised: was 60)
+VIX_THRESHOLD = 25.0        # below → trend-follow, at/above → mean-reversion
+VIX_SHORT_FILTER = 20.0     # daily-bias SHORT filter: skip SHORT when VIX < this
+VIX_BEAR_MIN = 25.0         # Option B min: ADX-triggered TREND_BEAR only when VIX≥25
 VIX_CRISIS = 30.0           # Option A: crisis bear → override back to trend-follow
-ADX_BEAR_TREND = 25.0       # Option B: trending bear (20≤VIX<30 + ADX>25) → trend-follow
+ADX_BEAR_TREND = 25.0       # Option B: trending bear (VIX_BEAR_MIN≤VIX<30 + ADX>25) → trend-follow
 ADX_RUNAWAY = 40.0
 # Option C: VIX-based position sizing
 VIX_SIZE_25 = 25.0
@@ -316,32 +318,20 @@ def evaluate_entry(
     out["boost_reasons"] = ",".join(boost_reasons)
 
     # Runaway trend veto — direction-aware
-    # In bear-VIX regime (VIX≥20) with bearish signal: strong ADX and all-sectors-down
-    # are exactly the setup we want for TREND_BEAR SHORT, so don't veto those.
-    is_bearish_signal = direction in ("PUT", "SHORT")
-    in_bear_vix = vix_val >= VIX_THRESHOLD
-
+    # Runaway trend veto — original symmetric check (pre-v10.2b)
+    # Direction-aware veto interacted badly with MEAN_REVERSION (score direction ≠ trade direction).
+    # Keep symmetric veto; TREND_BEAR SHORT exemption is handled by the strategy switch alone.
     adx_val = regime.get("details", {}).get("adx", {}).get("value")
     rsi_val = tech.get("rsi")
     s, q, i_ = pcts["SPY"], pcts["QQQ"], pcts["IWM"]
-    all_up   = s > SECTOR_THRESHOLD and q > SECTOR_THRESHOLD and i_ > SECTOR_THRESHOLD
-    all_down = s < -SECTOR_THRESHOLD and q < -SECTOR_THRESHOLD and i_ < -SECTOR_THRESHOLD
 
     is_runaway = False
-    # ADX: strong trend is fine for trend-following in bear regime
     if adx_val is not None and adx_val >= ADX_RUNAWAY:
-        if not (in_bear_vix and is_bearish_signal):
-            is_runaway = True
-    # RSI overbought always blocks; oversold blocks LONG but not SHORT in bear
-    if rsi_val is not None:
-        if rsi_val >= RSI_UPPER:
-            is_runaway = True
-        if rsi_val <= RSI_LOWER and not (in_bear_vix and is_bearish_signal):
-            is_runaway = True
-    # Sector surge: veto LONG on all-up; veto all-down only when NOT in bear SHORT setup
-    if all_up and not is_bearish_signal:
         is_runaway = True
-    if all_down and not (in_bear_vix and is_bearish_signal):
+    if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
+        is_runaway = True
+    if (s > SECTOR_THRESHOLD and q > SECTOR_THRESHOLD and i_ > SECTOR_THRESHOLD) or \
+       (s < -SECTOR_THRESHOLD and q < -SECTOR_THRESHOLD and i_ < -SECTOR_THRESHOLD):
         is_runaway = True
 
     out["grade"] = "STRONG" if boosted >= 88 else "MODERATE" if boosted >= min_score else "WEAK"
@@ -359,26 +349,22 @@ def evaluate_entry(
     is_bear = direction in ("PUT", "SHORT")
 
     # Daily-bias filter: skip SHORT in bullish daily trend (low VIX)
-    if daily_trend_long and is_bear and vix_val < VIX_THRESHOLD:
+    if daily_trend_long and is_bear and vix_val < VIX_SHORT_FILTER:
         out["reasons"].append("daily-bias SHORT skip")
         return out
 
-    # Adaptive strategy switch — Options A + B
-    # VIX < 20               : bull market → trend-follow
-    # 20 ≤ VIX < 30 + ADX>25 : trending bear → trend-follow (Option B)
-    # 20 ≤ VIX < 30 + ADX≤25 : choppy stress → mean-reversion (unchanged)
-    # VIX ≥ 30               : crisis bear → trend-follow override (Option A)
+    # Adaptive strategy switch — Option A only (B removed: hurts bull-market MEAN_REV)
+    # VIX < 20  : bull market → trend-follow
+    # 20 ≤ VIX < 30: mean-reversion (unchanged from v10.1)
+    # VIX ≥ 30  : crisis bear → trend-follow override (Option A)
     if no_mean_reversion or vix_val < VIX_THRESHOLD:
         is_trending = True
         bear_mode = False
     elif vix_val >= VIX_CRISIS:
-        is_trending = True          # Option A
-        bear_mode = True
-    elif adx_val is not None and adx_val >= ADX_BEAR_TREND:
-        is_trending = True          # Option B
+        is_trending = True          # Option A: true crisis → follow the move
         bear_mode = True
     else:
-        is_trending = False         # choppy stress: mean-reversion
+        is_trending = False         # moderate stress → mean-reversion (v10.1 behaviour)
         bear_mode = False
 
     if is_trending:

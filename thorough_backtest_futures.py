@@ -69,7 +69,7 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters v10.1 --
-MIN_SCORE = 60              # PRIME window minimum (v10.1: score≥60, ~3.1 days/trade)
+MIN_SCORE = 74              # PRIME window minimum (v10.2: score≥74, optimised)
 GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
 RISK_PCT = 0.015
 MARGIN_UTIL = 0.95
@@ -800,7 +800,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
     sizing_label = f"FIXED {FIXED_CONTRACTS}계약" if fixed_size else f"DYNAMIC Risk={RISK_PCT*100:.1f}%"
     results = {
-        "model": f"MES Futures Pro Strategy v10.1 (10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE})",
+        "model": f"MES Futures Pro Strategy v10.2 (10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE})",
         "period": f"{start_str} ~ {end_str}",
         "product": f"Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]",
         "strategy": f"ATR SL={ATR_SL_MULT}x · TP={TP_MULT}xSL · MinScore={MIN_SCORE} · ML Walk-Forward",
