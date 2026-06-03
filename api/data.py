@@ -324,6 +324,54 @@ def _alpaca_bars(symbol, timeframe="5Min"):
     return df
 
 
+def _alpaca_daily_bars(symbol, days=30):
+    """Fetch ~`days` of daily OHLC bars (oldest→newest) for ATR/NR7/pullback/SMA.
+
+    Returns a DataFrame with Open/High/Low/Close/Volume, newest row LAST, or an
+    empty frame on failure. Used by the v10 live bot to reproduce the backtest's
+    14-day ATR and daily-context filters.
+    """
+    end = datetime.now(NY)
+    start = end - timedelta(days=days * 2 + 10)  # weekend/holiday buffer
+    url = f"{ALPACA_DATA_URL}/v2/stocks/{symbol}/bars"
+    r = requests.get(url, headers=ALPACA_HEADERS, params={
+        "timeframe": "1Day", "start": start.date().isoformat(),
+        "limit": days + 15, "adjustment": "raw", "feed": "iex",
+    }, timeout=6)
+    r.raise_for_status()
+    bars = r.json().get("bars", [])
+    if not bars:
+        return pd.DataFrame()
+    df = pd.DataFrame(bars).rename(columns={
+        "o": "Open", "h": "High", "l": "Low", "c": "Close",
+        "v": "Volume", "t": "Timestamp"})
+    return df
+
+
+def _alpaca_morning_1min(symbol):
+    """Fetch today's RTH 1-minute bars from 09:30 ET up to now (capped ~180).
+
+    Indexed by tz-aware NY timestamp with capitalised OHLCV columns so it can be
+    sliced to the 10:30 entry and fed straight into the shared score engine.
+    """
+    now = datetime.now(NY)
+    start = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    url = f"{ALPACA_DATA_URL}/v2/stocks/{symbol}/bars"
+    r = requests.get(url, headers=ALPACA_HEADERS, params={
+        "timeframe": "1Min", "start": start.isoformat(),
+        "limit": 180, "adjustment": "raw", "feed": "iex",
+    }, timeout=6)
+    r.raise_for_status()
+    bars = r.json().get("bars", [])
+    if not bars:
+        return pd.DataFrame()
+    df = pd.DataFrame(bars).rename(columns={
+        "o": "Open", "h": "High", "l": "Low", "c": "Close",
+        "v": "Volume", "t": "Timestamp"})
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], utc=True).dt.tz_convert(NY)
+    return df.set_index("Timestamp")
+
+
 _BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"

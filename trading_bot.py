@@ -271,17 +271,22 @@ def main_loop():
 # keeps working for the GitHub Actions path.
 # ─────────────────────────────────────────────────────────────────────────────
 from api.v10_runner import (  # noqa: E402
-    FileStore, KVStore, run_once_entry, run_once_flatten,
-    V10_MIN_SCORE, V10_TP_MULT, V10_SL_ATR_MULT,
+    FileStore, KVStore, run_once_entry, run_once_flatten, run_once_monitor,
+    v10_worker, V10_MIN_SCORE, V10_TP_MULT, V10_SL_ATR_MULT,
 )
 
 
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="MES v10 trading bot")
-    p.add_argument("--once", choices=["entry", "flatten"],
+    p.add_argument("--once", choices=["entry", "flatten", "monitor"],
                    help="Run a single tick (for cron) then exit. "
-                        "Omit to run the continuous main_loop.")
+                        "Omit to run --worker or the legacy main_loop.")
+    p.add_argument("--worker", action="store_true",
+                   help="Run the persistent v10 worker: minute-by-minute entry + "
+                        "trail/BE exit management (most faithful to the backtest).")
+    p.add_argument("--poll", type=int, default=60,
+                   help="Worker poll interval in seconds (default 60).")
     p.add_argument("--store", choices=["file", "kv"], default="file",
                    help="State backend: file (default) or kv (Upstash).")
     a = p.parse_args()
@@ -290,5 +295,9 @@ if __name__ == "__main__":
         run_once_entry(store=_store)
     elif a.once == "flatten":
         run_once_flatten(store=_store)
+    elif a.once == "monitor":
+        run_once_monitor(store=_store)
+    elif a.worker:
+        v10_worker(poll_sec=a.poll, store=_store)
     else:
         main_loop()

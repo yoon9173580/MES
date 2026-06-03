@@ -17,8 +17,8 @@
     }
   ],
   "crons": [
-    { "path": "/api/cron_v10?mode=entry",   "schedule": "0 15 * * 1-5" },
-    { "path": "/api/cron_v10?mode=flatten", "schedule": "30 20 * * 1-5" }
+    { "path": "/api/cron_v10?mode=entry",   "schedule": "30 15 * * 1-5" },
+    { "path": "/api/cron_v10?mode=flatten", "schedule": "35 19 * * 1-5" }
   ],
   "routes": [
     {

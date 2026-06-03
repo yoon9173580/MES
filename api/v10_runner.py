@@ -3,11 +3,16 @@ v10 single-tick runner — shared by trading_bot.py (CLI / GitHub Actions) and
 api/cron_v10.py (Vercel Cron). Lives under api/ so Vercel's Python builder
 bundles it together with data.py, engines/ and lib/.
 
-Strategy mirrors thorough_backtest_futures.py v10 profile:
-  • single 10:30 ET PRIME entry (live window widened to [10:00, 12:00] for cron slack)
-  • MIN_SCORE 88 (not grade STRONG)
-  • SL = 1.5 × ATR, TP = 2.5 × SL  (the robust v10 lever)
-  • dead-market guard (regime ATR% ≥ 0.3) instead of the overfit backtest ATR>8 filter
+The entry decision is NOT re-implemented here — it is delegated to
+api/v10_strategy.evaluate_entry, the SAME pure function the backtest
+(thorough_backtest_futures.py) calls. That guarantees the live paper bot trades
+the exact strategy that produced the published metrics:
+  • single 10:30 ET PRIME entry, 14-day daily ATR (ES points)
+  • SL = min(max(1.5×ATR, 2), 15), TP = 2.5×SL
+  • MIN_SCORE 60, ATR floor 8, NR7/pullback boosts, runaway veto, daily-bias,
+    VIX-20 mean-reversion switch — all identical to the backtest.
+This module only handles data plumbing (SPY→ES scale), order sizing, bracket
+placement, persistence and the cron entry/flatten gating.
 """
 import os
 import sys
@@ -22,17 +27,19 @@ import pytz
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 try:
     from data import (
-        _fetch_market_bundle, _snap_price, _snap_prev_close, _pct,
-        load_portfolio, ALL_STOCKS, STOCK_SYMS, _kv_get, _kv_set,
+        _fetch_market_bundle, _snap_price,
+        _alpaca_daily_bars, _alpaca_morning_1min, _kv_get, _kv_set,
     )
-    from engines.score_engine import run_score_engine
+    from v10_strategy import (evaluate_entry, init_position, manage_bar,
+                              ENTRY_TIME, EXIT_TIME)
     from lib.brokers import get_broker
 except ImportError:
     from api.data import (
-        _fetch_market_bundle, _snap_price, _snap_prev_close, _pct,
-        load_portfolio, ALL_STOCKS, STOCK_SYMS, _kv_get, _kv_set,
+        _fetch_market_bundle, _snap_price,
+        _alpaca_daily_bars, _alpaca_morning_1min, _kv_get, _kv_set,
     )
-    from api.engines.score_engine import run_score_engine
+    from api.v10_strategy import (evaluate_entry, init_position, manage_bar,
+                                  ENTRY_TIME, EXIT_TIME)
     from api.lib.brokers import get_broker
 
 logger = logging.getLogger("v10")
@@ -42,12 +49,20 @@ V10_STATE_FILE = "v10_state.json"
 V10_LOG_FILE = "v10_paper_log.json"
 V10_LOG_CAP = 1000
 
-V10_MIN_SCORE = 60
-V10_SHORT_MIN_SCORE = 60
-V10_SL_ATR_MULT = 1.5
-V10_TP_MULT = 2.5
-V10_ATR_PCT_FLOOR = 0.3
+# Entry-decision parameters live in api/v10_strategy.py (shared with the
+# backtest). These are kept only for the order-sizing math below, which must
+# match thorough_backtest_futures.py's contract sizing.
 ES_PER_SPY = 10.0
+ES_MULTIPLIER = 5.0        # $5 per point (MES — Micro E-mini)
+ES_COMMISSION_RT = 0.50
+ES_SLIPPAGE_PTS = 0.25
+ES_DAY_MARGIN = 50.0
+RISK_PCT = 0.015
+MARGIN_UTIL = 0.95
+# Back-compat re-exports (trading_bot.py imports these names)
+V10_MIN_SCORE = 60
+V10_TP_MULT = 2.5
+V10_SL_ATR_MULT = 1.5
 
 
 # ── Pluggable persistence ────────────────────────────────────────────────────
@@ -110,49 +125,65 @@ def _place_bracket_order(broker, symbol, qty, side, tp, sl):
     return res
 
 
-def _evaluate(now):
-    """Run the same score engine the dashboard uses; return (score_result, ctx)."""
-    bundle = _fetch_market_bundle(ALL_STOCKS)
+def _gather_inputs(now):
+    """Assemble the exact inputs the shared v10 decision needs, in ES price space.
+
+    Backtest replays index/ES-scale prices (~5300). Live snapshots are SPY ETF
+    (~530), so every price is multiplied by ES_PER_SPY (10) to land on the same
+    scale the backtest (and its ATR floor of 8 points) was tuned on.
+    Returns (inputs_dict, ctx) or (None, {"reason": ...}) on failure.
+    """
+    bundle = _fetch_market_bundle(["SPY"])
     snaps = bundle.get("snaps") or {}
-    spy_snap = snaps.get("SPY", {})
-    spy_price = _snap_price(spy_snap)
+    spy_price = _snap_price(snaps.get("SPY", {}))
     if not spy_price:
         return None, {"reason": "no SPY snapshot"}
-    spy_prev = _snap_prev_close(spy_snap) or spy_price
-    vix_p, vix3m_p = bundle.get("vix", (18.0, None))
-    spy_h = bundle.get("spy_h")
+    vix_p, _ = bundle.get("vix", (18.0, None))
 
-    pcts = {}
-    for sym in STOCK_SYMS:
-        s = snaps.get(sym, {})
-        pcts[sym] = _pct(_snap_price(s), _snap_prev_close(s) or 1)
-
-    t_min = now.hour * 60 + now.minute
-    is_regular = 570 <= t_min <= 960
-    score_result = run_score_engine(
-        now_et=now, spy_price=spy_price, vix_price=vix_p, vix3m_price=vix3m_p,
-        prev_close=spy_prev, vwap=spy_price, vol_ratio=1.0,
-        range_value=abs(spy_price - spy_prev), pcts=pcts, spy_history=spy_h,
-        portfolio=load_portfolio(),
-        session_name="REGULAR" if is_regular else "CLOSED",
-    )
-    atr_es = 8.0
+    # Daily history (newest LAST) for ATR / NR7 / pullback / 20-SMA bias.
     try:
-        if spy_h is not None and not spy_h.empty:
-            sess_range = float(spy_h["High"].max() - spy_h["Low"].min())
-            atr_es = max(min(sess_range * ES_PER_SPY, 15.0), 4.0)
-    except Exception:
-        pass
-    ctx = {
-        "spy_price": spy_price, "es_price": spy_price * ES_PER_SPY,
-        "atr_es": atr_es, "is_regular": is_regular,
-        "atr_pct": (score_result.get("layers", {}).get("regime", {}) or {}).get("atr_pct"),
+        daily = _alpaca_daily_bars("SPY", days=30)
+    except Exception as e:
+        return None, {"reason": f"daily bars failed: {e}"}
+    if daily is None or daily.empty or len(daily) < 11:
+        return None, {"reason": "insufficient daily history"}
+    dh = (daily["High"] * ES_PER_SPY).tolist()
+    dl = (daily["Low"] * ES_PER_SPY).tolist()
+    dc = (daily["Close"] * ES_PER_SPY).tolist()
+    day_open = float(daily["Open"].iloc[-1]) * ES_PER_SPY
+
+    # Morning 1-min slice up to the 10:30 entry, in ES scale.
+    try:
+        morning = _alpaca_morning_1min("SPY")
+    except Exception as e:
+        return None, {"reason": f"morning bars failed: {e}"}
+    if morning is None or morning.empty:
+        return None, {"reason": "no morning bars"}
+    morning = morning[morning.index.time <= ENTRY_TIME].copy()
+    for col in ("Open", "High", "Low", "Close"):
+        if col in morning.columns:
+            morning[col] = morning[col] * ES_PER_SPY
+    if len(morning) < 5:
+        return None, {"reason": f"morning slice {len(morning)} bars < 5"}
+
+    entry_price = float(morning["Close"].iloc[-1])
+    entry_ts = morning.index[-1].to_pydatetime()
+    inputs = {
+        "daily_highs": dh, "daily_lows": dl, "daily_closes": dc,
+        "day_open": day_open, "entry_price": entry_price, "entry_ts": entry_ts,
+        "vix_val": vix_p, "morning_df": morning,
     }
-    return score_result, ctx
+    ctx = {"spy_price": spy_price, "es_price": entry_price, "vix": vix_p}
+    return inputs, ctx
 
 
 def run_once_entry(now=None, store=None):
-    """Evaluate v10 entry once and place at most one paper order for the day."""
+    """Evaluate v10 entry once and place at most one paper order for the day.
+
+    Delegates the whole decision (ATR, scoring, direction, SL/TP) to
+    api/v10_strategy.evaluate_entry — the *identical* function the backtest uses
+    — so the live paper bot trades the published strategy bar-for-bar.
+    """
     now = now or datetime.now(NY)
     store = store or FileStore()
     today = now.strftime("%Y-%m-%d")
@@ -166,71 +197,142 @@ def run_once_entry(now=None, store=None):
         logger.info(f"Already evaluated/traded today ({today}) — skipping.")
         return {"action": "SKIP_DONE", "date": today}
 
-    score_result, ctx = _evaluate(now)
-    if score_result is None:
+    inputs, ctx = _gather_inputs(now)
+    if inputs is None:
         logger.warning(f"Eval failed: {ctx.get('reason')}")
         store.append_log({"date": today, "ts": now.isoformat(),
                           "action": "NO_DATA", "reason": ctx.get("reason")})
         return {"action": "NO_DATA", "reason": ctx.get("reason")}
 
-    total_score = score_result["total_score"]
-    bias = score_result["direction_bias"]
-    atr_pct = ctx.get("atr_pct")
-    log_base = {"date": today, "ts": now.isoformat(), "score": total_score,
-                "bias": bias, "atr_pct": atr_pct, "spy": ctx["spy_price"]}
+    decision = evaluate_entry(**inputs)
+    log_base = {"date": today, "ts": now.isoformat(), "score": decision["score"],
+                "atr": decision["atr"], "spy": ctx["spy_price"], "vix": ctx["vix"]}
 
-    reasons = []
-    if not ctx["is_regular"]:
-        reasons.append("not RTH")
-    if total_score < V10_MIN_SCORE:
-        reasons.append(f"score {total_score} < {V10_MIN_SCORE}")
-    if bias not in ("LONG", "SHORT"):
-        reasons.append(f"bias {bias}")
-    if bias == "SHORT" and total_score < V10_SHORT_MIN_SCORE:
-        reasons.append("SHORT conviction")
-    if atr_pct is not None and atr_pct < V10_ATR_PCT_FLOOR:
-        reasons.append(f"dead market atr%={atr_pct:.2f}")
-
-    if reasons:
+    if not decision["enter"]:
+        reasons = decision["reasons"]
         logger.info(f"No entry — {'; '.join(reasons)}")
-        store.append_log({**log_base, "action": "NO_ENTRY", "reasons": reasons})
+        store.append_log({**log_base, "action": "NO_ENTRY", "reasons": reasons,
+                          "direction": decision.get("direction")})
         state["last_trade_date"] = today
         store.save_state(state)
-        return {"action": "NO_ENTRY", "reasons": reasons, "score": total_score}
+        return {"action": "NO_ENTRY", "reasons": reasons, "score": decision["score"]}
 
-    sl_es = round(max(V10_SL_ATR_MULT * ctx["atr_es"], 2.0), 2)
-    tp_es = round(V10_TP_MULT * sl_es, 2)
+    sl_es = round(decision["sl_points"], 2)
+    tp_es = round(decision["tp_points"], 2)
+    trade_dir = decision["direction"]
     es_price = ctx["es_price"]
-    side = "buy" if bias == "LONG" else "sell"
-    if bias == "LONG":
+    side = "buy" if trade_dir == "LONG" else "sell"
+    if trade_dir == "LONG":
         tp_price, sl_price = es_price + tp_es, es_price - sl_es
     else:
         tp_price, sl_price = es_price - tp_es, es_price + sl_es
 
     broker = get_broker()
+    # Sizing mirrors thorough_backtest_futures.py: risk% with slippage + margin cap.
+    equity = broker.get_account_equity() or 10000.0
+    risk_per_contract = (sl_es + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
+    qty = max(1, int((equity * RISK_PCT) / risk_per_contract))
+    qty = min(qty, max(1, int((equity * MARGIN_UTIL) / ES_DAY_MARGIN)))
+
     if broker.supports_futures:
         from lib.futures_meta import current_mes_contract
         symbol = current_mes_contract(now)
-        equity = broker.get_account_equity() or 500000.0
-        risk_per_contract = sl_es * 5.0 + 0.50
-        qty = max(1, int((equity * 0.015) / risk_per_contract))
     else:
         symbol = "SPY"
-        qty = 100
         tp_price = round(tp_price / ES_PER_SPY, 2)
         sl_price = round(sl_price / ES_PER_SPY, 2)
 
-    logger.info(f"v10 ENTRY: {symbol} {side} score={total_score} SL={sl_es}pt TP={tp_es}pt")
+    logger.info(f"v10 ENTRY: {symbol} {side} score={decision['score']} "
+                f"dir={trade_dir} SL={sl_es}pt TP={tp_es}pt qty={qty}")
     res = _place_bracket_order(broker, symbol, qty, side, tp_price, sl_price)
     entry = {**log_base, "action": "ENTRY", "symbol": symbol, "side": side,
-             "qty": qty, "sl_pts": sl_es, "tp_pts": tp_es,
+             "direction": trade_dir, "strategy": decision["strategy"],
+             "boosted_score": decision["boosted_score"], "qty": qty,
+             "sl_pts": sl_es, "tp_pts": tp_es,
              "tp_price": tp_price, "sl_price": sl_price,
              "broker": broker.name, "order_id": (res or {}).get("id")}
     store.append_log(entry)
+    # Position state for the worker's intraday trail/BE management. init_position
+    # is the SAME builder the backtest uses, so manage_bar() trails identically.
+    pos = init_position(trade_dir, es_price, decision["atr"], sl_es, V10_TP_MULT)
+    pos.update({"open": True, "qty": qty, "symbol": symbol, "side": side,
+                "date": today, "entry_ts": now.isoformat(),
+                "score": decision["score"], "strategy": decision["strategy"]})
     state.update({"last_trade_date": today, "in_position": bool(res),
-                  "last_order_id": (res or {}).get("id")})
+                  "last_order_id": (res or {}).get("id"), "position": pos})
     store.save_state(state)
     return entry
+
+
+def _latest_bar_es():
+    """Most recent completed 1-min (High, Low) in ES scale, or None."""
+    try:
+        m = _alpaca_morning_1min("SPY")
+    except Exception:
+        return None
+    if m is None or m.empty:
+        return None
+    last = m.iloc[-1]
+    return float(last["High"]) * ES_PER_SPY, float(last["Low"]) * ES_PER_SPY
+
+
+def _close_paper(store, state, pos, exit_price, exit_type, now):
+    """Record a paper exit (simulated fill, exactly like the backtest) + close."""
+    entry_price = pos["entry_price"]
+    qty = pos.get("qty", 1)
+    if pos["trade_dir"] == "LONG":
+        pts = exit_price - entry_price
+    else:
+        pts = entry_price - exit_price
+    net_pts = pts - ES_SLIPPAGE_PTS * 2
+    pnl = net_pts * ES_MULTIPLIER * qty - ES_COMMISSION_RT * qty
+    result = {"date": pos.get("date"), "ts": now.isoformat(), "action": "EXIT",
+              "exit_type": exit_type, "direction": pos["trade_dir"],
+              "entry_price": round(entry_price, 2), "exit_price": round(exit_price, 2),
+              "qty": qty, "point_pnl": round(net_pts, 2), "pnl": round(pnl, 2),
+              "be": pos["breakeven_activated"], "trail": pos["trailing_activated"]}
+    store.append_log(result)
+    pos["open"] = False
+    state["position"] = pos
+    state["in_position"] = False
+    store.save_state(state)
+    logger.info(f"v10 EXIT [{exit_type}] {pos['trade_dir']} pnl=${pnl:.0f} "
+                f"({net_pts:+.2f}pt × {qty})")
+    return result
+
+
+def run_once_monitor(now=None, store=None):
+    """One intraday management tick: trail/BE the open position or exit it.
+
+    Mirrors one iteration of the backtest's minute loop via manage_bar(). The
+    worker calls this every minute; it is also safe to call from a cron.
+    """
+    now = now or datetime.now(NY)
+    store = store or FileStore()
+    state = store.get_state()
+    pos = state.get("position")
+    if not pos or not pos.get("open"):
+        return {"action": "NO_POSITION"}
+
+    # EOD flatten — close at the latest price.
+    if now.time() >= EXIT_TIME:
+        bar = _latest_bar_es()
+        last_px = (bar[0] + bar[1]) / 2 if bar else pos["entry_price"]
+        return _close_paper(store, state, pos, last_px, "EOD", now)
+
+    bar = _latest_bar_es()
+    if bar is None:
+        return {"action": "NO_BAR"}
+    high, low = bar
+    exit_price, exit_type = manage_bar(pos, high, low)
+    if exit_type is not None:
+        return _close_paper(store, state, pos, exit_price, exit_type, now)
+
+    state["position"] = pos
+    store.save_state(state)
+    return {"action": "HOLD", "sl_target": round(pos["sl_target"], 2),
+            "best": round(pos["best_price"], 2),
+            "be": pos["breakeven_activated"], "trail": pos["trailing_activated"]}
 
 
 def run_once_flatten(now=None, store=None):
@@ -253,3 +355,47 @@ def run_once_flatten(now=None, store=None):
               "action": "FLATTEN", "positions": len(positions)}
     store.append_log(result)
     return result
+
+
+def v10_worker(poll_sec=60, store=None):
+    """Persistent worker — reproduces the backtest minute-by-minute on live data.
+
+    Run this on an always-on host (Oracle Cloud free VM, Fly.io, a small VPS,
+    etc.). It is the most faithful deployment of the v10 strategy because it
+    performs true intraday trail/breakeven management via manage_bar(), which a
+    2-cron-per-day Vercel schedule cannot do.
+
+    Loop per minute during RTH:
+      • 10:30-12:00 ET, flat → run_once_entry (one trade/day, KV-locked)
+      • position open       → run_once_monitor (trail/BE, or exit)
+      • ≥15:30 ET, open      → EOD flatten via run_once_monitor
+    Idles outside RTH. State persists to `store` (use KVStore to share with the
+    dashboard/cron, or FileStore for a self-contained box).
+    """
+    import time as _time
+    store = store or FileStore()
+    logger.info(f"v10 worker starting (broker={get_broker().name}, poll={poll_sec}s)")
+    while True:
+        try:
+            now = datetime.now(NY)
+            t_min = now.hour * 60 + now.minute
+            dow = now.weekday()  # 0=Mon … 4=Fri
+            state = store.get_state()
+            pos = state.get("position") or {}
+            has_pos = bool(pos.get("open"))
+
+            if dow < 5 and 570 <= t_min <= 960:        # weekday RTH 09:30-16:00
+                if has_pos:
+                    r = run_once_monitor(now=now, store=store)
+                    if r.get("action") in ("EXIT", "HOLD"):
+                        logger.info(f"monitor: {r}")
+                elif 10 * 60 <= t_min <= 12 * 60 and state.get("last_trade_date") != now.strftime("%Y-%m-%d"):
+                    r = run_once_entry(now=now, store=store)
+                    logger.info(f"entry: {r.get('action')}")
+            _time.sleep(poll_sec)
+        except KeyboardInterrupt:
+            logger.info("v10 worker stopped.")
+            break
+        except Exception as e:
+            logger.exception(f"worker loop error: {e}")
+            _time.sleep(poll_sec)
