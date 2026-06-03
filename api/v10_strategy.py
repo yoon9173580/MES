@@ -38,7 +38,15 @@ TP_MULT = 2.5               # TP = 2.5 × SL  (v10 lever)
 ATR_MIN = 8.0               # skip days whose 14-day ATR < 8 points
 MIN_SCORE = 60              # v10.1 entry threshold (was 88)
 VIX_THRESHOLD = 20.0        # below → trend-follow, at/above → mean-reversion
+VIX_CRISIS = 30.0           # Option A: crisis bear → override back to trend-follow
+ADX_BEAR_TREND = 25.0       # Option B: trending bear (20≤VIX<30 + ADX>25) → trend-follow
 ADX_RUNAWAY = 40.0
+# Option C: VIX-based position sizing (used by runner + backtest)
+VIX_SIZE_25 = 25.0
+VIX_SIZE_35 = 35.0
+RISK_PCT_FULL = 0.015       # VIX < 25
+RISK_PCT_BEAR = 0.010       # VIX 25–35
+RISK_PCT_CRISIS = 0.007     # VIX ≥ 35
 RSI_UPPER = 90.0
 RSI_LOWER = 10.0
 SECTOR_THRESHOLD = 1.8
@@ -54,6 +62,15 @@ TRAILING_ACTIVATION = 0.5   # arm trailing once profit ≥ 0.5×ATR
 TRAILING_STEP = 0.25        # trail at best − 0.25×ATR
 BREAKEVEN_AT = 0.25         # move stop to breakeven once profit ≥ 0.25×ATR
 ES_SLIPPAGE_PTS = 0.25      # 1-tick slippage cushion at breakeven
+
+
+def vix_risk_pct(vix):
+    """Option C: scale position risk down in elevated-VIX regimes."""
+    if vix >= VIX_SIZE_35:
+        return RISK_PCT_CRISIS
+    if vix >= VIX_SIZE_25:
+        return RISK_PCT_BEAR
+    return RISK_PCT_FULL
 
 
 # ── Daily-history helpers (identical math to the backtest) ────────────────────
@@ -330,11 +347,27 @@ def evaluate_entry(
         out["reasons"].append("daily-bias SHORT skip")
         return out
 
-    # Adaptive strategy switch
-    is_trending = no_mean_reversion or (vix_val < VIX_THRESHOLD)
+    # Adaptive strategy switch — Options A + B
+    # VIX < 20               : bull market → trend-follow
+    # 20 ≤ VIX < 30 + ADX>25 : trending bear → trend-follow (Option B)
+    # 20 ≤ VIX < 30 + ADX≤25 : choppy stress → mean-reversion (unchanged)
+    # VIX ≥ 30               : crisis bear → trend-follow override (Option A)
+    if no_mean_reversion or vix_val < VIX_THRESHOLD:
+        is_trending = True
+        bear_mode = False
+    elif vix_val >= VIX_CRISIS:
+        is_trending = True          # Option A
+        bear_mode = True
+    elif adx_val is not None and adx_val >= ADX_BEAR_TREND:
+        is_trending = True          # Option B
+        bear_mode = True
+    else:
+        is_trending = False         # choppy stress: mean-reversion
+        bear_mode = False
+
     if is_trending:
         trade_dir = "LONG" if is_bull else "SHORT"
-        strategy = "TREND_FOLLOW"
+        strategy = "TREND_BEAR" if bear_mode else "TREND_FOLLOW"
     else:
         trade_dir = "SHORT" if is_bull else "LONG"
         strategy = "MEAN_REVERSION"
@@ -343,6 +376,7 @@ def evaluate_entry(
         "enter": True,
         "direction": trade_dir,
         "strategy": strategy,
+        "bear_mode": bear_mode,
         "sl_points": round(window_sl, 4),
         "tp_points": round(window_sl * tp_mult, 4),
     })

@@ -57,6 +57,7 @@ from v10_strategy import (
     evaluate_entry as _shared_evaluate_entry,
     init_position as _shared_init_position,
     manage_bar as _shared_manage_bar,
+    vix_risk_pct as _vix_risk_pct,
 )
 
 NY = pytz.timezone("America/New_York")
@@ -548,7 +549,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
             if fixed_size:
                 num_contracts = FIXED_CONTRACTS
             else:
-                max_risk_dollar = balance * RISK_PCT
+                max_risk_dollar = balance * _vix_risk_pct(vix_val)  # Option C
                 risk_per_contract = (window_sl + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
                 num_contracts = int(max_risk_dollar / risk_per_contract)
                 if num_contracts == 0:
