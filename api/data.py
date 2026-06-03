@@ -76,18 +76,19 @@ BACKTEST_SUMMARY = {
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
-        # full year (350,548 bars). Replaces the prior daily-bar projection.
-        # KEY FINDING: strategy went near-dormant in the 2022 bear market —
-        # only 2 entries cleared all filters (VIX dead-zone, macro gate,
-        # regime check, score >= 88). This is GOOD behavior for capital
-        # preservation — strategy stayed out rather than chasing volatile
-        # mean-reversion in a structural decline. But also shows the
-        # strategy is *too* conservative for high-VIX regimes; consider
-        # a separate counter-trend mode if you want exposure in bear markets.
-        "model": "MES Bear Market Backtest (2022 real CME data)",
+        # full year (350,548 bars). v10.1 result: only 2 entries (VIX dead-zone,
+        # runaway veto, score ≥ 88 threshold blocked 306/308 days).
+        # v10.2 bear market upgrades (2026-06-03):
+        #   Option A: VIX≥30 → trend-follow override (not mean-reversion)
+        #   Option B: 20≤VIX<30 + ADX>25 → trend-follow the downtrend
+        #   Option C: VIX-scaled sizing (1.0% at VIX≥25, 0.7% at VIX≥35)
+        #   Direction-aware runaway veto: all-sectors-down does NOT block SHORT
+        #     in bear-VIX regime; ADX≥40 does NOT block bearish SHORT either.
+        # Re-backtest pending with Databento data.
+        "model": "MES Bear Market Backtest (2022 real CME data) — v10.2",
         "period": "2022-01-03 ~ 2022-12-30",
         "period_days": 252,
-        "strategy": "ATR SL=1.5x + Trail + BE | Risk=1.5% | Same filters as live (no special bear mode)",
+        "strategy": "v10.2: TREND_BEAR (A+B) + VIX sizing (C) + direction-aware runaway veto",
         "total_trades": 2,
         "wins": 1,
         "losses": 1,
@@ -99,8 +100,8 @@ BACKTEST_SUMMARY = {
         "annual_return_pct": 0.3,
         "total_pnl_pct": 0.3,
         "vix_avg": 25.8,
-        "note": "ACTUAL — Databento real 1-min data. Strategy filters blocked entry on 306/308 trading days (VIX dead-zone + macro gates). Result: capital preservation (+0.3%) but no alpha capture during bear market. Verdict: defensive design works as intended.",
-        "status": "ACTUAL",
+        "note": "v10.1 result (Score≥88): 2 trades, capital preservation only. v10.2 adds TREND_BEAR mode + direction-aware veto — expects more SHORT entries in VIX>20+ADX>25 regimes. Re-backtest with Databento data required to update these numbers.",
+        "status": "PENDING_REBACKTEST",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex 2022)",
     }
 }
