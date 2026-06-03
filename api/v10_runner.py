@@ -30,14 +30,16 @@ try:
         _fetch_market_bundle, _snap_price,
         _alpaca_daily_bars, _alpaca_morning_1min, _kv_get, _kv_set,
     )
-    from v10_strategy import evaluate_entry, ENTRY_TIME
+    from v10_strategy import (evaluate_entry, init_position, manage_bar,
+                              ENTRY_TIME, EXIT_TIME)
     from lib.brokers import get_broker
 except ImportError:
     from api.data import (
         _fetch_market_bundle, _snap_price,
         _alpaca_daily_bars, _alpaca_morning_1min, _kv_get, _kv_set,
     )
-    from api.v10_strategy import evaluate_entry, ENTRY_TIME
+    from api.v10_strategy import (evaluate_entry, init_position, manage_bar,
+                                  ENTRY_TIME, EXIT_TIME)
     from api.lib.brokers import get_broker
 
 logger = logging.getLogger("v10")
@@ -250,10 +252,87 @@ def run_once_entry(now=None, store=None):
              "tp_price": tp_price, "sl_price": sl_price,
              "broker": broker.name, "order_id": (res or {}).get("id")}
     store.append_log(entry)
+    # Position state for the worker's intraday trail/BE management. init_position
+    # is the SAME builder the backtest uses, so manage_bar() trails identically.
+    pos = init_position(trade_dir, es_price, decision["atr"], sl_es, V10_TP_MULT)
+    pos.update({"open": True, "qty": qty, "symbol": symbol, "side": side,
+                "date": today, "entry_ts": now.isoformat(),
+                "score": decision["score"], "strategy": decision["strategy"]})
     state.update({"last_trade_date": today, "in_position": bool(res),
-                  "last_order_id": (res or {}).get("id")})
+                  "last_order_id": (res or {}).get("id"), "position": pos})
     store.save_state(state)
     return entry
+
+
+def _latest_bar_es():
+    """Most recent completed 1-min (High, Low) in ES scale, or None."""
+    try:
+        m = _alpaca_morning_1min("SPY")
+    except Exception:
+        return None
+    if m is None or m.empty:
+        return None
+    last = m.iloc[-1]
+    return float(last["High"]) * ES_PER_SPY, float(last["Low"]) * ES_PER_SPY
+
+
+def _close_paper(store, state, pos, exit_price, exit_type, now):
+    """Record a paper exit (simulated fill, exactly like the backtest) + close."""
+    entry_price = pos["entry_price"]
+    qty = pos.get("qty", 1)
+    if pos["trade_dir"] == "LONG":
+        pts = exit_price - entry_price
+    else:
+        pts = entry_price - exit_price
+    net_pts = pts - ES_SLIPPAGE_PTS * 2
+    pnl = net_pts * ES_MULTIPLIER * qty - ES_COMMISSION_RT * qty
+    result = {"date": pos.get("date"), "ts": now.isoformat(), "action": "EXIT",
+              "exit_type": exit_type, "direction": pos["trade_dir"],
+              "entry_price": round(entry_price, 2), "exit_price": round(exit_price, 2),
+              "qty": qty, "point_pnl": round(net_pts, 2), "pnl": round(pnl, 2),
+              "be": pos["breakeven_activated"], "trail": pos["trailing_activated"]}
+    store.append_log(result)
+    pos["open"] = False
+    state["position"] = pos
+    state["in_position"] = False
+    store.save_state(state)
+    logger.info(f"v10 EXIT [{exit_type}] {pos['trade_dir']} pnl=${pnl:.0f} "
+                f"({net_pts:+.2f}pt × {qty})")
+    return result
+
+
+def run_once_monitor(now=None, store=None):
+    """One intraday management tick: trail/BE the open position or exit it.
+
+    Mirrors one iteration of the backtest's minute loop via manage_bar(). The
+    worker calls this every minute; it is also safe to call from a cron.
+    """
+    now = now or datetime.now(NY)
+    store = store or FileStore()
+    state = store.get_state()
+    pos = state.get("position")
+    if not pos or not pos.get("open"):
+        return {"action": "NO_POSITION"}
+
+    # EOD flatten — close at the latest price.
+    if now.time() >= EXIT_TIME:
+        bar = _latest_bar_es()
+        last_px = (bar[0] + bar[1]) / 2 if bar else pos["entry_price"]
+        return _close_paper(store, state, pos, last_px, "EOD", now)
+
+    bar = _latest_bar_es()
+    if bar is None:
+        return {"action": "NO_BAR"}
+    high, low = bar
+    exit_price, exit_type = manage_bar(pos, high, low)
+    if exit_type is not None:
+        return _close_paper(store, state, pos, exit_price, exit_type, now)
+
+    state["position"] = pos
+    store.save_state(state)
+    return {"action": "HOLD", "sl_target": round(pos["sl_target"], 2),
+            "best": round(pos["best_price"], 2),
+            "be": pos["breakeven_activated"], "trail": pos["trailing_activated"]}
 
 
 def run_once_flatten(now=None, store=None):
@@ -276,3 +355,47 @@ def run_once_flatten(now=None, store=None):
               "action": "FLATTEN", "positions": len(positions)}
     store.append_log(result)
     return result
+
+
+def v10_worker(poll_sec=60, store=None):
+    """Persistent worker — reproduces the backtest minute-by-minute on live data.
+
+    Run this on an always-on host (Oracle Cloud free VM, Fly.io, a small VPS,
+    etc.). It is the most faithful deployment of the v10 strategy because it
+    performs true intraday trail/breakeven management via manage_bar(), which a
+    2-cron-per-day Vercel schedule cannot do.
+
+    Loop per minute during RTH:
+      • 10:30-12:00 ET, flat → run_once_entry (one trade/day, KV-locked)
+      • position open       → run_once_monitor (trail/BE, or exit)
+      • ≥15:30 ET, open      → EOD flatten via run_once_monitor
+    Idles outside RTH. State persists to `store` (use KVStore to share with the
+    dashboard/cron, or FileStore for a self-contained box).
+    """
+    import time as _time
+    store = store or FileStore()
+    logger.info(f"v10 worker starting (broker={get_broker().name}, poll={poll_sec}s)")
+    while True:
+        try:
+            now = datetime.now(NY)
+            t_min = now.hour * 60 + now.minute
+            dow = now.weekday()  # 0=Mon … 4=Fri
+            state = store.get_state()
+            pos = state.get("position") or {}
+            has_pos = bool(pos.get("open"))
+
+            if dow < 5 and 570 <= t_min <= 960:        # weekday RTH 09:30-16:00
+                if has_pos:
+                    r = run_once_monitor(now=now, store=store)
+                    if r.get("action") in ("EXIT", "HOLD"):
+                        logger.info(f"monitor: {r}")
+                elif 10 * 60 <= t_min <= 12 * 60 and state.get("last_trade_date") != now.strftime("%Y-%m-%d"):
+                    r = run_once_entry(now=now, store=store)
+                    logger.info(f"entry: {r.get('action')}")
+            _time.sleep(poll_sec)
+        except KeyboardInterrupt:
+            logger.info("v10 worker stopped.")
+            break
+        except Exception as e:
+            logger.exception(f"worker loop error: {e}")
+            _time.sleep(poll_sec)

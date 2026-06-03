@@ -47,6 +47,13 @@ PULLBACK_SCORE_BOOST = 5
 SL_MIN_PTS = 2.0
 SL_CAP_PTS = 15.0
 ENTRY_TIME = dtime(10, 30)  # single PRIME entry
+EXIT_TIME = dtime(15, 30)   # EOD flatten
+
+# Intraday exit management (mirror thorough_backtest_futures.py)
+TRAILING_ACTIVATION = 0.5   # arm trailing once profit ≥ 0.5×ATR
+TRAILING_STEP = 0.25        # trail at best − 0.25×ATR
+BREAKEVEN_AT = 0.25         # move stop to breakeven once profit ≥ 0.25×ATR
+ES_SLIPPAGE_PTS = 0.25      # 1-tick slippage cushion at breakeven
 
 
 # ── Daily-history helpers (identical math to the backtest) ────────────────────
@@ -130,6 +137,78 @@ def stop_loss_points(atr_val, gamma_mult=1.0, sl_cap=SL_CAP_PTS):
     PRIME window: gamma_mult=1.0, sl_cap=15. GAMMA (afternoon, v9): 0.75 / 10.
     """
     return min(max(ATR_SL_MULT * gamma_mult * atr_val, SL_MIN_PTS), sl_cap)
+
+
+def init_position(trade_dir, entry_price, atr, sl_points, tp_mult=TP_MULT):
+    """Build the exit-management state for a freshly opened position.
+
+    Mirrors thorough_backtest_futures.py lines 564-571: fixed TP, initial SL,
+    high-water mark, and the breakeven/trailing flags.
+    """
+    tp_points = sl_points * tp_mult
+    if trade_dir == "LONG":
+        tp_target = entry_price + tp_points
+        sl_target = entry_price - sl_points
+    else:
+        tp_target = entry_price - tp_points
+        sl_target = entry_price + sl_points
+    return {
+        "trade_dir": trade_dir, "entry_price": entry_price, "atr": atr,
+        "sl_points": sl_points, "tp_target": tp_target, "sl_target": sl_target,
+        "best_price": entry_price,
+        "breakeven_activated": False, "trailing_activated": False,
+    }
+
+
+def manage_bar(pos, bar_high, bar_low):
+    """Advance one bar of intraday management; mutate `pos` in place.
+
+    Returns (exit_price, exit_type) if the position should close this bar, else
+    (None, None). exit_type ∈ {TP, TRAIL, BE, SL}. Bit-for-bit identical to the
+    backtest's minute loop (lines 583-636) so live trailing/BE matches.
+    """
+    td = pos["trade_dir"]
+    entry = pos["entry_price"]
+    atr = pos["atr"]
+
+    if td == "LONG":
+        if bar_high > pos["best_price"]:
+            pos["best_price"] = bar_high
+        profit = pos["best_price"] - entry
+        # TP first (prioritise locking the gain)
+        if bar_high >= pos["tp_target"]:
+            return pos["tp_target"], "TP"
+        if not pos["breakeven_activated"] and profit >= BREAKEVEN_AT * atr:
+            pos["sl_target"] = entry + ES_SLIPPAGE_PTS
+            pos["breakeven_activated"] = True
+        if profit >= TRAILING_ACTIVATION * atr:
+            tsl = pos["best_price"] - TRAILING_STEP * atr
+            if tsl > pos["sl_target"]:
+                pos["sl_target"] = tsl
+                pos["trailing_activated"] = True
+        if bar_low <= pos["sl_target"]:
+            etype = ("TRAIL" if pos["trailing_activated"]
+                     else "BE" if pos["breakeven_activated"] else "SL")
+            return pos["sl_target"], etype
+    else:  # SHORT
+        if bar_low < pos["best_price"]:
+            pos["best_price"] = bar_low
+        profit = entry - pos["best_price"]
+        if bar_low <= pos["tp_target"]:
+            return pos["tp_target"], "TP"
+        if not pos["breakeven_activated"] and profit >= BREAKEVEN_AT * atr:
+            pos["sl_target"] = entry - ES_SLIPPAGE_PTS
+            pos["breakeven_activated"] = True
+        if profit >= TRAILING_ACTIVATION * atr:
+            tsl = pos["best_price"] + TRAILING_STEP * atr
+            if tsl < pos["sl_target"]:
+                pos["sl_target"] = tsl
+                pos["trailing_activated"] = True
+        if bar_high >= pos["sl_target"]:
+            etype = ("TRAIL" if pos["trailing_activated"]
+                     else "BE" if pos["breakeven_activated"] else "SL")
+            return pos["sl_target"], etype
+    return None, None
 
 
 def evaluate_entry(

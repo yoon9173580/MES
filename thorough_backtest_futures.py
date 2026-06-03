@@ -53,7 +53,11 @@ from engines.regime import calculate_regime_score
 from engines.correlation import calculate_correlation_score
 from engines.time_window import calculate_time_score
 from engines.technical import calculate_technical_score
-from v10_strategy import evaluate_entry as _shared_evaluate_entry
+from v10_strategy import (
+    evaluate_entry as _shared_evaluate_entry,
+    init_position as _shared_init_position,
+    manage_bar as _shared_manage_bar,
+)
 
 NY = pytz.timezone("America/New_York")
 
@@ -561,14 +565,11 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                 max_by_margin_ref = int((balance * MARGIN_UTIL) / ES_DAY_MARGIN)
                 num_contracts = ml.apply_sizing(num_contracts, max_by_margin_ref)
 
-            # Minute-by-Minute Simulation
+            # Minute-by-Minute Simulation — exit management delegated to the
+            # shared module so the live worker (api/v10_runner.v10_worker)
+            # trails/breaks-even identically.
             entry_price = spy_entry_price
-            tp_points = window_sl * TP_MULT
-            tp_target = entry_price + tp_points if trade_dir == "LONG" else entry_price - tp_points
-            sl_target = entry_price - window_sl if trade_dir == "LONG" else entry_price + window_sl
-            breakeven_activated = False
-            trailing_activated = False
-            best_price = entry_price
+            _pos = _shared_init_position(trade_dir, entry_price, atr_val, window_sl, TP_MULT)
 
             exit_price = None
             exit_type = "EOD"
@@ -579,61 +580,12 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                     continue
                 if ts_bar.time() > EXIT_TIME:
                     break
-
-                if trade_dir == "LONG":
-                    if h_bar > best_price:
-                        best_price = h_bar
-                    current_profit_pts = best_price - entry_price
-
-                    # Take-Profit check (before SL to prioritize gain locking)
-                    if h_bar >= tp_target:
-                        exit_price = tp_target
-                        exit_type = "TP"
-                        exit_time_str = ts_bar.strftime("%H:%M")
-                        break
-
-                    if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
-                        sl_target = entry_price + ES_SLIPPAGE_PTS
-                        breakeven_activated = True
-
-                    if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
-                        trailing_sl = best_price - TRAILING_STEP * atr_val
-                        if trailing_sl > sl_target:
-                            sl_target = trailing_sl
-                            trailing_activated = True
-
-                    if l_bar <= sl_target:
-                        exit_price = sl_target
-                        exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
-                        exit_time_str = ts_bar.strftime("%H:%M")
-                        break
-                else:  # SHORT
-                    if l_bar < best_price:
-                        best_price = l_bar
-                    current_profit_pts = entry_price - best_price
-
-                    # Take-Profit check
-                    if l_bar <= tp_target:
-                        exit_price = tp_target
-                        exit_type = "TP"
-                        exit_time_str = ts_bar.strftime("%H:%M")
-                        break
-
-                    if not breakeven_activated and current_profit_pts >= BREAKEVEN_AT * atr_val:
-                        sl_target = entry_price - ES_SLIPPAGE_PTS
-                        breakeven_activated = True
-
-                    if current_profit_pts >= TRAILING_ACTIVATION * atr_val:
-                        trailing_sl = best_price + TRAILING_STEP * atr_val
-                        if trailing_sl < sl_target:
-                            sl_target = trailing_sl
-                            trailing_activated = True
-
-                    if h_bar >= sl_target:
-                        exit_price = sl_target
-                        exit_type = "TRAIL" if trailing_activated else ("BE" if breakeven_activated else "SL")
-                        exit_time_str = ts_bar.strftime("%H:%M")
-                        break
+                _xp, _xt = _shared_manage_bar(_pos, h_bar, l_bar)
+                if _xt is not None:
+                    exit_price = _xp
+                    exit_type = _xt
+                    exit_time_str = ts_bar.strftime("%H:%M")
+                    break
 
             # EOD fallback exit
             if exit_price is None:
