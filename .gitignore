@@ -59,3 +59,9 @@ site_audit.html
 
 # Test artifacts
 plot.png
+
+# v10 bot runtime artifacts
+v10_paper_log.json
+v10_state.json
+api/v10_paper_log.json
+api/v10_state.json

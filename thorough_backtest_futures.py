@@ -53,6 +53,7 @@ from engines.regime import calculate_regime_score
 from engines.correlation import calculate_correlation_score
 from engines.time_window import calculate_time_score
 from engines.technical import calculate_technical_score
+from v10_strategy import evaluate_entry as _shared_evaluate_entry
 
 NY = pytz.timezone("America/New_York")
 
@@ -455,41 +456,19 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         except:
             vix_val = 18.0
 
-        # ===== PRO STRATEGIES: Pre-Score Calculations =====
+        # ===== Shared v10 decision inputs (newest-LAST daily history incl. today) =====
+        # The entry decision (ATR, NR7, pullback, daily-bias, scoring, direction,
+        # SL/TP) is delegated to api/v10_strategy.evaluate_entry so the live paper
+        # bot trades the *identical* logic. Only ML sizing + the minute-by-minute
+        # exit simulation remain backtest-only below.
+        _hist = trading_days[:day_idx + 1]
+        _dh = [daily_ohlc[d]["high"]  for d in _hist if d in daily_ohlc]
+        _dl = [daily_ohlc[d]["low"]   for d in _hist if d in daily_ohlc]
+        _dc = [daily_ohlc[d]["close"] for d in _hist if d in daily_ohlc]
 
-        # [Crabel] NR7 Volatility Filter
-        is_nr7 = check_nr7(daily_ohlc, trading_days, day_idx)
-
-        # [Mean Reversion] 3-Day Pullback
-        is_pullback = check_3day_pullback(daily_ohlc, trading_days, day_idx)
-
-        # [Macro] Daily Trend Bias (above 20 SMA)
-        daily_trend_long = check_daily_bias(daily_ohlc, trading_days, day_idx, spy_o)
-
-        # [ATR] Dynamic SL calculation
-        atr_val = calc_atr(daily_ohlc, trading_days, day_idx)
-        sl_points = max(ATR_SL_MULT * atr_val, 2.0)
-        sl_points = min(sl_points, 15.0)
-
-        # ── Optional filters ──
+        # ── Optional VIX filter (per-run override; ATR floor handled in module) ──
         if vix_max is not None and vix_val > vix_max:
             continue
-        if atr_min is not None and atr_val < atr_min:
-            continue
-
-        # [Gap] Gap context
-        gap_bias = 0  # -1=fade gap up, +1=fade gap down, 0=neutral
-        if day_idx >= 1:
-            prev_ds = trading_days[day_idx - 1]
-            if prev_ds in daily_ohlc:
-                prev_close = daily_ohlc[prev_ds]["close"]
-                gap_pct = ((spy_o - prev_close) / prev_close) * 100
-                if abs(gap_pct) > 1.2:
-                    gap_bias = 0  # Large gap: don't fade
-                elif gap_pct > 0.1:
-                    gap_bias = -1  # Small gap up: bearish
-                elif gap_pct < -0.1:
-                    gap_bias = 1   # Small gap down: bullish
 
         # ===== Multi-Window Entry Scan: PRIME (10:30~11:15) + GAMMA (14:00~14:30) =====
         trades_today = 0
@@ -514,99 +493,35 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
             ts_entry, spy_entry_price, _, _, _, _ = entry_bar
 
-            # Tighter SL for GAMMA (only ~90 min until EOD exit)
-            gamma_mult = 0.75 if is_gamma else 1.0
-            sl_cap = 10.0 if is_gamma else 15.0
-            window_sl = max(ATR_SL_MULT * gamma_mult * atr_val, 2.0)
-            window_sl = min(window_sl, sl_cap)
-
             # Slice bars up to entry time for scoring
             df_morning = df_day[df_day.index.time <= entry_time].copy()
             if len(df_morning) < 5:
                 continue
             df_morning.columns = [col.capitalize() for col in df_morning.columns]
 
-            # Sector returns (relative to day open)
-            spy_morning_ret = ((spy_entry_price / spy_o) - 1.0) * 100
-            pcts = {
-                "SPY": spy_morning_ret,
-                "QQQ": spy_morning_ret * 1.2 if spy_morning_ret >= 0 else spy_morning_ret * 1.3,
-                "IWM": spy_morning_ret * 0.9,
-                "DIA": spy_morning_ret * 0.8
-            }
-
-            # Window metrics
-            vwap_morning = (df_morning["High"] * df_morning["Volume"]).sum() / df_morning["Volume"].sum() if df_morning["Volume"].sum() > 0 else spy_entry_price
-            range_morning = float(df_morning["High"].max() - df_morning["Low"].min())
-            avg_5min_vol = df_morning["Volume"].tail(5).mean()
-            avg_morning_vol = df_morning["Volume"].mean()
-            vol_ratio = avg_5min_vol / avg_morning_vol if avg_morning_vol > 0 else 1.0
-
-            # Score Engine
-            try:
-                regime = calculate_regime_score(
-                    vix_price=vix_val, vix3m_price=vix_val * 1.08,
-                    spy_price=spy_entry_price, prev_close=spy_o, spy_history=df_morning)
-                corr = calculate_correlation_score(pcts)
-                time_win = calculate_time_score(ts_entry)
-                tech = calculate_technical_score(spy_entry_price, vwap_morning, vol_ratio, range_morning, df_morning)
-
-                active_scores = [regime["score"], corr["score"], time_win["score"], tech["score"]]
-                # Use actual window score as time ceiling — GAMMA(15pts) gets active_max=105,
-                # PRIME(20pts) gets active_max=110, making both fairly comparable at 88 threshold
-                active_max = regime["max"] + corr["max"] + time_win["score"] + tech["max"]
-                if active_max <= 0:
-                    active_max = 110
-                normalized = int((sum(active_scores) / active_max) * 100)
-                direction = tech.get("direction_bias", "NEUTRAL")
-            except Exception:
-                continue
-
-            # Score Boosting
-            boosted_score = normalized
-            boost_reasons = []
-            if is_nr7:
-                boosted_score += NR7_SCORE_BOOST
-                boost_reasons.append("NR7")
-            if is_pullback and direction == "CALL":
-                boosted_score += PULLBACK_SCORE_BOOST
-                boost_reasons.append("3DAY_PB")
-
-            # Runaway Trend Veto
-            is_runaway_trend = False
-            adx_val = regime.get("details", {}).get("adx", {}).get("value")
-            if adx_val is not None and adx_val >= ADX_RUNAWAY:
-                is_runaway_trend = True
-            rsi_val = tech.get("rsi")
-            if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
-                is_runaway_trend = True
-            spy_ret, qqq_ret, iwm_ret = pcts.get("SPY", 0), pcts.get("QQQ", 0), pcts.get("IWM", 0)
-            if (spy_ret > SECTOR_THRESHOLD and qqq_ret > SECTOR_THRESHOLD and iwm_ret > SECTOR_THRESHOLD) or \
-               (spy_ret < -SECTOR_THRESHOLD and qqq_ret < -SECTOR_THRESHOLD and iwm_ret < -SECTOR_THRESHOLD):
-                is_runaway_trend = True
-
-            # Entry filter — GAMMA uses lower threshold (scores naturally lower at 14:00)
+            # ── Shared v10 entry decision (identical logic runs in the live bot) ──
+            gamma_mult = 0.75 if is_gamma else 1.0
+            sl_cap = 10.0 if is_gamma else 15.0
             effective_min = GAMMA_MIN_SCORE if is_gamma else MIN_SCORE
-            grade = "STRONG" if boosted_score >= 88 else "MODERATE" if boosted_score >= effective_min else "WEAK"
-            if boosted_score < effective_min or direction not in ("CALL", "PUT", "LONG", "SHORT") or is_runaway_trend:
+            decision = _shared_evaluate_entry(
+                daily_highs=_dh, daily_lows=_dl, daily_closes=_dc,
+                day_open=spy_o, entry_price=spy_entry_price, entry_ts=ts_entry,
+                vix_val=vix_val, morning_df=df_morning,
+                min_score=effective_min, tp_mult=TP_MULT, atr_min=atr_min,
+                no_mean_reversion=no_mean_reversion,
+                gamma_mult=gamma_mult, sl_cap=sl_cap,
+            )
+            atr_val = decision["atr"]
+            if not decision["enter"]:
                 continue
 
-            # Normalize to LONG/SHORT
-            is_bull_signal = direction in ("CALL", "LONG")
-            is_bear_signal = direction in ("PUT", "SHORT")
-
-            # Daily Bias Filter: skip SHORT in bullish daily trend (low VIX)
-            if daily_trend_long and is_bear_signal and vix_val < VIX_THRESHOLD:
-                continue
-
-            # Adaptive Strategy Switching
-            is_trending = no_mean_reversion or (vix_val < VIX_THRESHOLD)
-            if is_trending:
-                trade_dir = "LONG" if is_bull_signal else "SHORT"
-                strategy_used = "TREND_FOLLOW"
-            else:
-                trade_dir = "SHORT" if is_bull_signal else "LONG"
-                strategy_used = "MEAN_REVERSION"
+            window_sl = decision["sl_points"]
+            normalized = decision["score"]
+            boosted_score = decision["boosted_score"]
+            boost_reasons = decision["boost_reasons"].split(",") if decision["boost_reasons"] else []
+            grade = decision["grade"]
+            trade_dir = decision["direction"]
+            strategy_used = decision["strategy"]
 
             # ── ML Walk-Forward 사이징 ───────────────────────────────────────
             recent_wr5 = (sum(1 for t in trades[-5:] if t["pnl"] > 0)

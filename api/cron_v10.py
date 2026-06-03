@@ -5,10 +5,11 @@ Runs one v10 single-tick (entry or flatten) per invocation and persists state
 to Upstash KV (Vercel functions are ephemeral, so the local FileStore won't
 survive between cron runs). Wired from vercel.json `crons`:
 
-    entry   — 15:00 UTC weekdays → 11:00 ET (EDT) / 10:00 ET (EST), both inside
-              the bot's [10:00, 12:00] ET PRIME window.
-    flatten — 20:30 UTC weekdays → 16:30 ET (EDT) / 15:30 ET (EST), at/after the
-              15:35 ET EOD in both seasons.
+    entry   — 15:30 UTC weekdays → 11:30 ET (EDT) / 10:30 ET (EST). Chosen so the
+              10:30 ET PRIME bar is COMPLETE in both seasons (the decision always
+              slices morning bars to 10:30, matching the backtest exactly).
+    flatten — 19:35 UTC weekdays → 15:35 ET (EDT) / 14:35 ET (EST), at/after the
+              backtest's 15:30 ET EOD in EDT (bracket TP/SL cap intraday exits).
 
 Mode is chosen from the current UTC hour unless overridden by ?mode=entry|flatten.
 
