@@ -31,7 +31,7 @@ try:
         _alpaca_daily_bars, _alpaca_morning_1min, _kv_get, _kv_set,
     )
     from v10_strategy import (evaluate_entry, init_position, manage_bar,
-                              ENTRY_TIME, EXIT_TIME)
+                              ENTRY_TIME, EXIT_TIME, vix_risk_pct)
     from lib.brokers import get_broker
 except ImportError:
     from api.data import (
@@ -39,7 +39,7 @@ except ImportError:
         _alpaca_daily_bars, _alpaca_morning_1min, _kv_get, _kv_set,
     )
     from api.v10_strategy import (evaluate_entry, init_position, manage_bar,
-                                  ENTRY_TIME, EXIT_TIME)
+                                  ENTRY_TIME, EXIT_TIME, vix_risk_pct)
     from api.lib.brokers import get_broker
 
 logger = logging.getLogger("v10")
@@ -228,10 +228,11 @@ def run_once_entry(now=None, store=None):
         tp_price, sl_price = es_price - tp_es, es_price + sl_es
 
     broker = get_broker()
-    # Sizing mirrors thorough_backtest_futures.py: risk% with slippage + margin cap.
+    # Sizing: VIX-scaled risk% (Option C) + slippage + margin cap.
     equity = broker.get_account_equity() or 10000.0
+    risk_pct = vix_risk_pct(ctx["vix"])
     risk_per_contract = (sl_es + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
-    qty = max(1, int((equity * RISK_PCT) / risk_per_contract))
+    qty = max(1, int((equity * risk_pct) / risk_per_contract))
     qty = min(qty, max(1, int((equity * MARGIN_UTIL) / ES_DAY_MARGIN)))
 
     if broker.supports_futures:
@@ -243,7 +244,8 @@ def run_once_entry(now=None, store=None):
         sl_price = round(sl_price / ES_PER_SPY, 2)
 
     logger.info(f"v10 ENTRY: {symbol} {side} score={decision['score']} "
-                f"dir={trade_dir} SL={sl_es}pt TP={tp_es}pt qty={qty}")
+                f"dir={trade_dir} strategy={decision['strategy']} "
+                f"SL={sl_es}pt TP={tp_es}pt qty={qty} risk%={risk_pct*100:.1f} vix={ctx['vix']:.1f}")
     res = _place_bracket_order(broker, symbol, qty, side, tp_price, sl_price)
     entry = {**log_base, "action": "ENTRY", "symbol": symbol, "side": side,
              "direction": trade_dir, "strategy": decision["strategy"],
