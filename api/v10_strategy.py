@@ -315,17 +315,33 @@ def evaluate_entry(
     out["boosted_score"] = boosted
     out["boost_reasons"] = ",".join(boost_reasons)
 
-    # Runaway trend veto
-    is_runaway = False
+    # Runaway trend veto — direction-aware
+    # In bear-VIX regime (VIX≥20) with bearish signal: strong ADX and all-sectors-down
+    # are exactly the setup we want for TREND_BEAR SHORT, so don't veto those.
+    is_bearish_signal = direction in ("PUT", "SHORT")
+    in_bear_vix = vix_val >= VIX_THRESHOLD
+
     adx_val = regime.get("details", {}).get("adx", {}).get("value")
-    if adx_val is not None and adx_val >= ADX_RUNAWAY:
-        is_runaway = True
     rsi_val = tech.get("rsi")
-    if rsi_val is not None and (rsi_val >= RSI_UPPER or rsi_val <= RSI_LOWER):
-        is_runaway = True
     s, q, i_ = pcts["SPY"], pcts["QQQ"], pcts["IWM"]
-    if (s > SECTOR_THRESHOLD and q > SECTOR_THRESHOLD and i_ > SECTOR_THRESHOLD) or \
-       (s < -SECTOR_THRESHOLD and q < -SECTOR_THRESHOLD and i_ < -SECTOR_THRESHOLD):
+    all_up   = s > SECTOR_THRESHOLD and q > SECTOR_THRESHOLD and i_ > SECTOR_THRESHOLD
+    all_down = s < -SECTOR_THRESHOLD and q < -SECTOR_THRESHOLD and i_ < -SECTOR_THRESHOLD
+
+    is_runaway = False
+    # ADX: strong trend is fine for trend-following in bear regime
+    if adx_val is not None and adx_val >= ADX_RUNAWAY:
+        if not (in_bear_vix and is_bearish_signal):
+            is_runaway = True
+    # RSI overbought always blocks; oversold blocks LONG but not SHORT in bear
+    if rsi_val is not None:
+        if rsi_val >= RSI_UPPER:
+            is_runaway = True
+        if rsi_val <= RSI_LOWER and not (in_bear_vix and is_bearish_signal):
+            is_runaway = True
+    # Sector surge: veto LONG on all-up; veto all-down only when NOT in bear SHORT setup
+    if all_up and not is_bearish_signal:
+        is_runaway = True
+    if all_down and not (in_bear_vix and is_bearish_signal):
         is_runaway = True
 
     out["grade"] = "STRONG" if boosted >= 88 else "MODERATE" if boosted >= min_score else "WEAK"
