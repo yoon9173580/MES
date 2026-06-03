@@ -67,8 +67,8 @@ ES_COMMISSION_RT = 0.50    # Round-trip commission per MES contract
 ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
-# -- Strategy Parameters v9 --
-MIN_SCORE = 88              # PRIME window minimum (STRONG grade)
+# -- Strategy Parameters v10.1 --
+MIN_SCORE = 60              # PRIME window minimum (v10.1: score≥60, ~3.1 days/trade)
 GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
 RISK_PCT = 0.015
 MARGIN_UTIL = 0.95
@@ -81,7 +81,7 @@ SECTOR_THRESHOLD = 1.8
 LOCKOUT_STRIKES = 5         # lenient lockout (was 2)
 LOCKOUT_DAYS = 0            # no cooldown period (was 1)
 ATR_SL_MULT = 1.5
-TP_MULT = 1.5               # TP = 1.5x SL
+TP_MULT = 2.5               # TP = 2.5x SL (v10.1)
 TRAILING_ACTIVATION = 0.5
 TRAILING_STEP = 0.25
 BREAKEVEN_AT = 0.25
@@ -799,7 +799,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
     sizing_label = f"FIXED {FIXED_CONTRACTS}계약" if fixed_size else f"DYNAMIC Risk={RISK_PCT*100:.1f}%"
     results = {
-        "model": f"MES Futures Pro Strategy v9 (ML Walk-Forward · PRIME+REENTRY+GAMMA · STRONG≥88)",
+        "model": f"MES Futures Pro Strategy v10.1 (10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE})",
         "period": f"{start_str} ~ {end_str}",
         "product": f"Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]",
         "strategy": f"ATR SL={ATR_SL_MULT}x · TP={TP_MULT}xSL · MinScore={MIN_SCORE} · ML Walk-Forward",
@@ -890,12 +890,10 @@ if __name__ == "__main__":
         WalkForwardML.SKIP_THRESH = 0.43
 
     if args.profile == "v10":
-        # v10 improvements over v4: better TP asymmetry + ATR floor
-        if args.tp_mult is None:
-            args.tp_mult = 2.5
+        # v10.1: TP×2.5 and MIN_SCORE=60 are now the module-level defaults.
         if args.atr_min is None:
             args.atr_min = 8.0
-        print("[*] PROFILE: v10 — 10:30 PRIME · TP×2.5 · ATR>8 · ML-skip off (Sharpe≈0.46 on real CME)")
+        print(f"[*] PROFILE: v10.1 — 10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE}")
     elif args.profile == "v4":
         print("[*] PROFILE: v4 — narrow 10:30 PRIME only, legacy defaults")
 
