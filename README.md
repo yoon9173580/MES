@@ -6,6 +6,10 @@ Deployed at https://hannaealgo.vercel.app (Google SSO required).
 > Low-frequency, high-conviction strategy. Quality over quantity.
 > Goal: catch the few setups per month that pay big, skip the noise.
 
+> 📋 **New here?** Read **[HANDOFF.md](HANDOFF.md)** — a thorough guide to the
+> environment, v10.3 strategy, architecture, deployment, and gotchas for anyone
+> (human or AI) picking up this project.
+
 ---
 
 ## Architecture
