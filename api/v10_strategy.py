@@ -46,7 +46,7 @@ ADX_RUNAWAY = 40.0
 # Option C: VIX-based position sizing
 VIX_SIZE_25 = 25.0
 VIX_SIZE_35 = 35.0
-RISK_PCT_FULL = 0.020       # VIX < 25 (v10.3: raised from 0.015 — wider stops, low DD)
+RISK_PCT_FULL = 0.025       # VIX < 25 (v10.3: 2.5% — targets ~31% annual)
 RISK_PCT_BEAR = 0.010       # 25 ≤ VIX < 35
 RISK_PCT_CRISIS = 0.007     # VIX ≥ 35
 RSI_UPPER = 90.0

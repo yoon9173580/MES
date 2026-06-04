@@ -71,7 +71,7 @@ ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 # -- Strategy Parameters v10.1 --
 MIN_SCORE = 74              # PRIME window minimum (v10.2: score≥74, optimised)
 GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
-RISK_PCT = 0.020            # v10.3: raised from 0.015 (display/fixed-size; dynamic path uses vix_risk_pct)
+RISK_PCT = 0.025            # v10.3: 2.5% — targets ~31% annual
 MARGIN_UTIL = 0.95
 EXIT_TIME = dtime(15, 30)
 VIX_THRESHOLD = 20.0

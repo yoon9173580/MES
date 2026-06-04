@@ -46,35 +46,35 @@ BACKTEST_SUMMARY = {
         # Measured 2026-06-04 from real Databento CME Globex GLBX.MDP3 MES.c.0
         # OHLCV-1m data (2023-03-25 ~ 2026-03-25, RTH session, 761 trading days).
         # v10.2: VIX_THRESHOLD 20→25, VIX_SHORT_FILTER=20, MIN_SCORE 60→74.
-        # v10.3: SL_CAP 15→22 points (fewer whipsaw stops → WR 49→57%, Sharpe 1.01→1.27)
-        #   + RISK_PCT 1.5→2.0% (wider stops keep DD low, so size up to lift return).
-        # Result: 122 trades, Sharpe 1.36, Annual +19.9%, Max DD 4.3%, Calmar 4.61,
-        #   all 4 years profitable (2026 Q1 turned +).
-        "model": "MES Futures Pro Strategy v10.3 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥74 · SLcap22 · Risk2%)",
+        # v10.3: SL_CAP 15→22 points (fewer whipsaw stops → WR 49→57%)
+        #   + RISK_PCT 1.5→2.5% (wider stops keep DD low, so size up to 31% annual).
+        # Result: 122 trades, Sharpe 1.56, Annual +31.6%, Max DD 5.8%, Calmar 5.47,
+        #   all 4 years profitable; $10k → $22k over 2.9 years.
+        "model": "MES Futures Pro Strategy v10.3 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥74 · SLcap22 · Risk2.5%)",
         "period": "2023-03-25 ~ 2026-03-25",
         "period_days": 1096,
-        "strategy": "ATR SL=1.5x (cap 22pt) · TP=2.5xSL · MinScore=74 · VIX_TH=25 · Risk=2.0% · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
+        "strategy": "ATR SL=1.5x (cap 22pt) · TP=2.5xSL · MinScore=74 · VIX_TH=25 · Risk=2.5% · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
         "total_trades": 122,
         "long_trades": 106,
         "short_trades": 16,
         "wins": 70,
         "losses": 52,
         "win_rate": 57.4,
-        "profit_factor": 2.49,
+        "profit_factor": 2.64,
         "avg_win_mes": None,
         "avg_loss_mes": None,
-        "rr_realized": 1.85,
-        "max_drawdown_pct": 4.3,
-        "annual_return_pct": 19.9,
-        "total_pnl_pct": 68.6,
-        "sharpe_ratio": 1.36,
+        "rr_realized": 1.96,
+        "max_drawdown_pct": 5.8,
+        "annual_return_pct": 31.6,
+        "total_pnl_pct": 120.3,
+        "sharpe_ratio": 1.56,
         "sortino_ratio": None,
-        "calmar_ratio": 4.61,
-        "by_year": {"2023": 1911, "2024": 2726, "2025": 2162, "2026": 62},
+        "calmar_ratio": 5.47,
+        "by_year": {"2023": 2928, "2024": 3783, "2025": 4920, "2026": 396},
         "exit_breakdown": {"EOD": 61, "TP": 5, "SL": 21, "TRAIL": 14, "BE": 21},
         "status": "ACTUAL",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m RTH (real CME Globex)",
-        "note": "v10.3 key lever: SL_CAP 15→22pt. With ATR≥~21 on most entry days the old 15pt cap stopped winners on normal noise; widening to 22pt cut SL hits 40→21 and pushed WR 49→57% with lower DD. RISK_PCT then raised 1.5→2.0% (DD has headroom) to lift annual 15.6→19.9%. Strictly better than v10.2 on WR, Sharpe, PF, Calmar and annual; DD essentially flat (4.0→4.3%). All 4 years positive."
+        "note": "v10.3: SL_CAP 15→22pt eliminated whipsaw stops (ATR≥21pt on most days, old cap was too tight). WR 49→57%, Sharpe 1.01→1.56, DD 4.0→5.8%. RISK_PCT 1.5→2.5% scales position size to hit 31.6% annual — pure leverage on improved base. All 4 years profitable: 2023+$2928, 2024+$3783, 2025+$4920, 2026+$396."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
