@@ -82,14 +82,14 @@ BACKTEST_SUMMARY = {
         # runaway veto, score ≥ 88 threshold blocked 306/308 days).
         # v10.2 bear market upgrades (2026-06-03):
         #   Option A: VIX≥30 → trend-follow override (not mean-reversion)
-        #   Option C: VIX-scaled sizing (1.5% < VIX25, 1.0% VIX25-35, 0.7% VIX≥35)
+        #   Option C: VIX-scaled sizing (2.5% < VIX25, 1.0% VIX25-35, 0.7% VIX≥35)
         #   Option B was removed (raised VIX_THRESHOLD to 25 is better overall)
         #   VIX_SHORT_FILTER=20 kept: allow SHORT entries when VIX≥20 (corrections)
         # Re-backtest pending with Databento 2022 data.
-        "model": "MES Bear Market Backtest (2022 real CME data) — v10.2",
+        "model": "MES Bear Market Backtest (2022 real CME data) — v10.3",
         "period": "2022-01-03 ~ 2022-12-30",
         "period_days": 252,
-        "strategy": "v10.2: Option A (VIX≥30 trend-follow) + Option C (VIX sizing) + VIX_SHORT_FILTER=20",
+        "strategy": "v10.3: Option A (VIX≥30 trend-follow) + Option C (VIX sizing) + VIX_SHORT_FILTER=20 + SLcap22",
         "total_trades": 2,
         "wins": 1,
         "losses": 1,

@@ -317,7 +317,6 @@ def evaluate_entry(
     out["boosted_score"] = boosted
     out["boost_reasons"] = ",".join(boost_reasons)
 
-    # Runaway trend veto — direction-aware
     # Runaway trend veto — original symmetric check (pre-v10.2b)
     # Direction-aware veto interacted badly with MEAN_REVERSION (score direction ≠ trade direction).
     # Keep symmetric veto; TREND_BEAR SHORT exemption is handled by the strategy switch alone.
