@@ -46,7 +46,7 @@ ADX_RUNAWAY = 40.0
 # Option C: VIX-based position sizing
 VIX_SIZE_25 = 25.0
 VIX_SIZE_35 = 35.0
-RISK_PCT_FULL = 0.015       # VIX < 25
+RISK_PCT_FULL = 0.020       # VIX < 25 (v10.3: raised from 0.015 — wider stops, low DD)
 RISK_PCT_BEAR = 0.010       # 25 ≤ VIX < 35
 RISK_PCT_CRISIS = 0.007     # VIX ≥ 35
 RSI_UPPER = 90.0
@@ -55,7 +55,7 @@ SECTOR_THRESHOLD = 1.8
 NR7_SCORE_BOOST = 5
 PULLBACK_SCORE_BOOST = 5
 SL_MIN_PTS = 2.0
-SL_CAP_PTS = 15.0
+SL_CAP_PTS = 22.0           # v10.3: widened from 15 — fewer whipsaw stops, higher WR
 ENTRY_TIME = dtime(10, 30)  # single PRIME entry
 EXIT_TIME = dtime(15, 30)   # EOD flatten
 

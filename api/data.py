@@ -43,37 +43,38 @@ MAX_OPEN_TRADES  = 1        # Max 1 MES position simultaneously
 # ── Backtest Summary (embedded static data — no file read at runtime) ─
 BACKTEST_SUMMARY = {
     "mes_futures": {
-        # Measured 2026-06-03 from real Databento CME Globex GLBX.MDP3 MES.c.0
+        # Measured 2026-06-04 from real Databento CME Globex GLBX.MDP3 MES.c.0
         # OHLCV-1m data (2023-03-25 ~ 2026-03-25, RTH session, 761 trading days).
-        # v10.2: raised VIX_THRESHOLD 20→25 (reduces mean-reversion zone in bull market),
-        #   added VIX_SHORT_FILTER=20 (separate daily-bias SHORT filter),
-        #   raised MIN_SCORE 60→74 (filters marginal entries, improves signal quality).
-        # Result: 122 trades, Sharpe 1.01, Annual +15.6%, Max DD 4.0%, Calmar 3.91.
-        "model": "MES Futures Pro Strategy v10.2 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥74)",
+        # v10.2: VIX_THRESHOLD 20→25, VIX_SHORT_FILTER=20, MIN_SCORE 60→74.
+        # v10.3: SL_CAP 15→22 points (fewer whipsaw stops → WR 49→57%, Sharpe 1.01→1.27)
+        #   + RISK_PCT 1.5→2.0% (wider stops keep DD low, so size up to lift return).
+        # Result: 122 trades, Sharpe 1.36, Annual +19.9%, Max DD 4.3%, Calmar 4.61,
+        #   all 4 years profitable (2026 Q1 turned +).
+        "model": "MES Futures Pro Strategy v10.3 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥74 · SLcap22 · Risk2%)",
         "period": "2023-03-25 ~ 2026-03-25",
         "period_days": 1096,
-        "strategy": "ATR SL=1.5x · TP=2.5xSL · MinScore=74 · VIX_TH=25 · VIX_ShortFilter=20 · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
+        "strategy": "ATR SL=1.5x (cap 22pt) · TP=2.5xSL · MinScore=74 · VIX_TH=25 · Risk=2.0% · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
         "total_trades": 122,
         "long_trades": 106,
         "short_trades": 16,
-        "wins": 60,
-        "losses": 62,
-        "win_rate": 49.2,
-        "profit_factor": 2.09,
+        "wins": 70,
+        "losses": 52,
+        "win_rate": 57.4,
+        "profit_factor": 2.49,
         "avg_win_mes": None,
         "avg_loss_mes": None,
-        "rr_realized": 2.16,
-        "max_drawdown_pct": 4.0,
-        "annual_return_pct": 15.6,
-        "total_pnl_pct": 51.9,
-        "sharpe_ratio": 1.01,
+        "rr_realized": 1.85,
+        "max_drawdown_pct": 4.3,
+        "annual_return_pct": 19.9,
+        "total_pnl_pct": 68.6,
+        "sharpe_ratio": 1.36,
         "sortino_ratio": None,
-        "calmar_ratio": 3.91,
-        "by_year": {"2023": 1649, "2024": 1963, "2025": 1770, "2026": -194},
-        "exit_breakdown": {"EOD": 39, "TP": 19, "SL": 40, "TRAIL": 5, "BE": 19},
+        "calmar_ratio": 4.61,
+        "by_year": {"2023": 1911, "2024": 2726, "2025": 2162, "2026": 62},
+        "exit_breakdown": {"EOD": 61, "TP": 5, "SL": 21, "TRAIL": 14, "BE": 21},
         "status": "ACTUAL",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m RTH (real CME Globex)",
-        "note": "v10.2 key improvements: (1) VIX_THRESHOLD 20→25 eliminates mean-reversion SHORT in bull-market corrections (was killing Sharpe). (2) Separate VIX_SHORT_FILTER=20 keeps profitable correction-SHORT trades. (3) MIN_SCORE 60→74 filters marginal entries. Net: Sharpe 0.27→1.01, Max DD 9.2→4.0%, Annual 7.9→15.6%. 2024 most improved year (+421→+1963)."
+        "note": "v10.3 key lever: SL_CAP 15→22pt. With ATR≥~21 on most entry days the old 15pt cap stopped winners on normal noise; widening to 22pt cut SL hits 40→21 and pushed WR 49→57% with lower DD. RISK_PCT then raised 1.5→2.0% (DD has headroom) to lift annual 15.6→19.9%. Strictly better than v10.2 on WR, Sharpe, PF, Calmar and annual; DD essentially flat (4.0→4.3%). All 4 years positive."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
