@@ -66,28 +66,28 @@ Deployed at https://hannaealgo.vercel.app (Google SSO required).
 
 ---
 
-## Backtest Results (v10.3 — Real Databento CME Data)
+## Backtest Results (v10.4 — Real Databento CME Data)
 
 ### 3.1-Year Window (2023-03-25 ~ 2026-05-28, $10k acct)
 
 | Metric                  | Value      | Note                        |
 |-------------------------|-----------:|-----------------------------|
-| Total trades            | 129        | ~42/yr                      |
-| Win rate                | 56.6%      |                             |
-| Profit factor           | **2.74**   |                             |
-| R:R realized            | 2.10       | TP=2.5×SL asymmetry         |
-| **Annual return (CAGR)**| **31.8%**  | ⚠️ in-sample optimized + 2.5% risk |
-| **Max drawdown**        | **5.8%**   |                             |
-| **Sharpe ratio**        | **1.57**   |                             |
-| Calmar ratio            | 5.51       |                             |
+| Total trades            | 156        | ~49/yr                      |
+| Win rate                | 53.2%      |                             |
+| Profit factor           | **2.21**   |                             |
+| R:R realized            | 1.95       | TP=2.5×SL asymmetry         |
+| **Annual return (CAGR)**| **31.6%**  | ⚠️ in-sample optimized + 2.5% risk |
+| **Max drawdown**        | **6.0%**   |                             |
+| **Sharpe ratio**        | **1.44**   |                             |
+| Calmar ratio            | 5.23       |                             |
 
 All 4 calendar years profitable (P&L on $10k acct):
-2023 +$2,928 · 2024 +$3,783 · 2025 +$4,920 · 2026 +$2,022
+2023 +$2,594 · 2024 +$3,372 · 2025 +$5,835 · 2026 +$1,904
 
 > ⚠️ **Overfitting caveat — read this before trusting the headline.**
-> `MIN_SCORE=74` and `SL_CAP=22` were **grid-searched on this same 2023–2026
+> `MIN_SCORE=68` and `SL_CAP=22` were **grid-searched on this same 2023–2026
 > dataset**, and the headline uses **2.5% risk-per-trade** (pure leverage). So
-> 31.8% / Sharpe 1.57 is an **in-sample-optimized, leveraged** figure — expect
+> 31.6% / Sharpe 1.44 is an **in-sample-optimized, leveraged** figure — expect
 > less live. The walk-forward robustness check (`walk_forward_backtest.py`) is
 > the honest picture: every test year stays profitable but **Sharpe degrades
 > from 2.24 (2023 train) to ~1.1–1.6 (2024–26)**:
@@ -105,27 +105,23 @@ All 4 calendar years profitable (P&L on $10k acct):
 
 ### v10.x Key Changes
 
-| Change | v10 baseline | v10.3 |
+| Change | v10 baseline | v10.4 |
 |---|---|---|
 | TP target | 1.5×SL | **2.5×SL** |
 | ATR filter | none | **ATR > 8 pts/day** |
 | ML skip | on (SKIP_N=25) | **off** |
 | Entry window | PRIME only | PRIME only (same) |
-| Score threshold | 88 | **74** (grid-searched) |
+| Score threshold | 88 | **68** (grid-searched; 74→68 for +18% frequency) |
 | SL cap | 15 pt | **22 pt** (grid-searched) |
 | Risk per trade | 1.5% | **2.5%** (leverage) |
 | VIX threshold | 20 | **25** |
 
-### Bear Market 2022 (Real Data)
+### Bear Market 2022
 
-| Metric                  | Value      |
-|-------------------------|-----------:|
-| Total trades            | 2          |
-| Annual return           | +0.3%      |
-| Max drawdown            | 1.3%       |
-| **Verdict**             | **DORMANT — defensive design worked** |
-
-Filters blocked entry on 306/308 days. Capital preservation worked.
+2022년 Databento 데이터 미보유 (CSV는 2023-03-27부터). 재백테스트를 위해
+`MES_1min_data_2022_et_rth.csv` (Databento GLBX.MDP3 ohlcv-1m RTH) 필요.
+v10.1 결과 (score≥88): 2거래, 자본 보존. v10.4 (score≥68 + TREND_BEAR)에서는
+더 많은 SHORT 진입 예상.
 
 ---
 
