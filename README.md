@@ -6,6 +6,10 @@ Deployed at https://hannaealgo.vercel.app (Google SSO required).
 > Low-frequency, high-conviction strategy. Quality over quantity.
 > Goal: catch the few setups per month that pay big, skip the noise.
 
+> 📋 **New here?** Read **[HANDOFF.md](HANDOFF.md)** — a thorough guide to the
+> environment, v10.3 strategy, architecture, deployment, and gotchas for anyone
+> (human or AI) picking up this project.
+
 ---
 
 ## Architecture
@@ -62,39 +66,55 @@ Deployed at https://hannaealgo.vercel.app (Google SSO required).
 
 ---
 
-## Backtest Results (v10 — Real Databento CME Data)
+## Backtest Results (v10.3 — Real Databento CME Data)
 
-### 3.2-Year Window (2023-03-25 ~ 2026-05-29)
+### 3.1-Year Window (2023-03-25 ~ 2026-05-28, $10k acct)
 
 | Metric                  | Value      | Note                        |
 |-------------------------|-----------:|-----------------------------|
-| Total trades            | 34         | ~11/yr, quality not qty     |
-| Win rate                | 52.9%      |                             |
-| Profit factor           | **2.68**   |                             |
-| R:R realized            | 2.39       | TP=2.5×SL asymmetry         |
-| **Annual return (CAGR)**| **8.8%**   |                             |
-| **Max drawdown**        | **4.9%**   |                             |
-| **Sharpe ratio**        | **0.46**   | vs −0.14 on v4 baseline     |
-| Calmar ratio            | 1.80       |                             |
+| Total trades            | 129        | ~42/yr                      |
+| Win rate                | 56.6%      |                             |
+| Profit factor           | **2.74**   |                             |
+| R:R realized            | 2.10       | TP=2.5×SL asymmetry         |
+| **Annual return (CAGR)**| **31.8%**  | ⚠️ in-sample optimized + 2.5% risk |
+| **Max drawdown**        | **5.8%**   |                             |
+| **Sharpe ratio**        | **1.57**   |                             |
+| Calmar ratio            | 5.51       |                             |
 
-All 4 calendar years profitable:
+All 4 calendar years profitable (P&L on $10k acct):
+2023 +$2,928 · 2024 +$3,783 · 2025 +$4,920 · 2026 +$2,022
 
-| Year | P&L ($500k acct) | Return |
-|------|------------------:|-------:|
-| 2023 (partial) | +$25,942 | +5.2% |
-| 2024 | +$64,024 | +12.8% |
-| 2025 | +$45,577 | +9.1% |
-| 2026 (partial) | +$4,014 | +0.8% |
+> ⚠️ **Overfitting caveat — read this before trusting the headline.**
+> `MIN_SCORE=74` and `SL_CAP=22` were **grid-searched on this same 2023–2026
+> dataset**, and the headline uses **2.5% risk-per-trade** (pure leverage). So
+> 31.8% / Sharpe 1.57 is an **in-sample-optimized, leveraged** figure — expect
+> less live. The walk-forward robustness check (`walk_forward_backtest.py`) is
+> the honest picture: every test year stays profitable but **Sharpe degrades
+> from 2.24 (2023 train) to ~1.1–1.6 (2024–26)**:
+>
+> | Split | Trades | WR | Annual | Sharpe | PF |
+> |---|--:|--:|--:|--:|--:|
+> | 2023 (train) | 32 | 62.5% | 43.8% | 2.24 | 3.97 |
+> | 2024 (test)  | 41 | 51.2% | 19.6% | 1.10 | 2.26 |
+> | 2025 (test)  | 43 | 58.1% | 28.9% | 1.28 | 2.00 |
+> | 2026 (test)  | 16 | 43.8% | 29.1% | 1.56 | 3.56 |
+>
+> The older, more conservative v10 baseline (MIN_SCORE 88, 1.5% risk, SL_CAP 15)
+> measured **8.8% CAGR / Sharpe 0.46 / 34 trades** on the same data — a useful
+> lower bound on what's robust vs. tuned.
 
-### v10 Key Changes
+### v10.x Key Changes
 
-| Change | Before | After |
+| Change | v10 baseline | v10.3 |
 |---|---|---|
 | TP target | 1.5×SL | **2.5×SL** |
 | ATR filter | none | **ATR > 8 pts/day** |
 | ML skip | on (SKIP_N=25) | **off** |
 | Entry window | PRIME only | PRIME only (same) |
-| Score threshold | 88 | 88 (same) |
+| Score threshold | 88 | **74** (grid-searched) |
+| SL cap | 15 pt | **22 pt** (grid-searched) |
+| Risk per trade | 1.5% | **2.5%** (leverage) |
+| VIX threshold | 20 | **25** |
 
 ### Bear Market 2022 (Real Data)
 

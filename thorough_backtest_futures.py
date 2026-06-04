@@ -105,7 +105,7 @@ def load_vix_data():
     import yfinance as yf
     print("[*] Fetching historical VIX data for backtest...")
     try:
-        vix_df = yf.download("^VIX", start="2018-01-01", end="2026-05-25", interval="1d", progress=False)
+        vix_df = yf.download("^VIX", start="2018-01-01", interval="1d", progress=False)
         if not vix_df.empty:
             if isinstance(vix_df.columns, pd.MultiIndex):
                 return vix_df["Close"].squeeze()
@@ -362,7 +362,7 @@ class WalkForwardML:
 
 
 def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
-                         end_str: str = "2026-03-25",
+                         end_str: str = None,
                          start_balance: float = 10000.0,
                          fixed_size: bool = False,
                          out_path: str = "backtest_futures.json",
@@ -401,7 +401,9 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         df.index = df.index.tz_convert(NY)
     df = df.sort_index()
 
-    # Filter dates
+    # Filter dates — end_str=None means "use all data up to the last bar"
+    if end_str is None:
+        end_str = df.index.max().strftime("%Y-%m-%d")
     start_dt = pd.to_datetime(start_str).tz_localize(NY)
     end_dt = pd.to_datetime(end_str).tz_localize(NY) + timedelta(days=1)
     df_filtered = df[(df.index >= start_dt) & (df.index < end_dt)].copy()
@@ -856,7 +858,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="S&P 500 Futures (ES) Pro Strategy Backtest")
     parser.add_argument("--csv", type=str, default="SPY_1min_synthetic.csv")
     parser.add_argument("--start", type=str, default="2023-03-25")
-    parser.add_argument("--end", type=str, default="2026-03-25")
+    parser.add_argument("--end", type=str, default=None,
+                        help="End date (default: last bar in the data)")
     parser.add_argument("--balance", type=float, default=10000.0)
     parser.add_argument("--fixed-size", action="store_true",
                         help="Use fixed contract count (no reinvestment effect)")

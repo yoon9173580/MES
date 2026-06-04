@@ -7,10 +7,11 @@ Splits the 3-year Databento MES dataset into:
   - TEST window 2 (2025-01-01 ~ 2025-12-31)   12 months — pure OOS
   - TEST window 3 (2026-01-01 ~ 2026-03-25)   ~3 months — most recent OOS
 
-Strategy has no fitted parameters (MIN_SCORE, ATR multiplier, risk %
-are all hardcoded), so this is pure OOS validation rather than
-parameter retuning. The point is to confirm WR / PF / MDD do NOT
-collapse on data the strategy has never been calibrated against.
+CAVEAT (v10.3): MIN_SCORE (74) and SL_CAP (22) were grid-searched on the
+FULL 2023-2026 dataset, so the TEST splits below are NOT pure out-of-sample
+— those years partly informed the parameter choice. Treat this as a
+robustness/degradation check (does performance hold up year-by-year?), not
+a clean OOS proof. For true OOS, fit only on TRAIN and freeze before testing.
 
 If TEST metrics degrade > 30% vs TRAIN, the engine is overfit to
 2023 conditions and the live system should not use these settings.
@@ -23,14 +24,26 @@ import sys
 import argparse
 
 # Reuse the main backtest engine — single source of truth
+from datetime import time as dtime
+import thorough_backtest_futures as _bt
 from thorough_backtest_futures import run_futures_backtest
+
+
+def _apply_v10_profile():
+    """Force the v10 PRIME-only profile that main() sets, so the walk-forward
+    validates the SAME strategy the live bot runs (single 10:30 entry, 1 trade/day,
+    ML-skip off). Without this, run_futures_backtest uses the module defaults
+    (multi-window, 4 trades/day) and tests a different — worse — strategy."""
+    _bt.ENTRY_WINDOWS = [dtime(10, 30)]
+    _bt.MAX_TRADES_PER_DAY = 1
+    _bt.WalkForwardML.SKIP_AFTER_N = 9999
 
 
 SPLITS = [
     ("TRAIN",  "2023-03-25", "2023-12-31"),  # in-sample
     ("TEST_2024", "2024-01-01", "2024-12-31"),
     ("TEST_2025", "2025-01-01", "2025-12-31"),
-    ("TEST_2026", "2026-01-01", "2026-03-25"),
+    ("TEST_2026", "2026-01-01", None),  # None = through last bar in the data
 ]
 
 
@@ -45,6 +58,7 @@ def main(csv_path: str, balance: float):
     print("  WALK-FORWARD OUT-OF-SAMPLE VALIDATION — MES Futures")
     print("=" * 80)
 
+    _apply_v10_profile()
     results = {}
     for label, start, end in SPLITS:
         print(f"\n>>> Running split: {label} ({start} ~ {end})")
