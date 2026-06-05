@@ -123,6 +123,29 @@ All 4 calendar years profitable (P&L on $10k acct):
 v10.1 결과 (score≥88): 2거래, 자본 보존. v10.4 (score≥68 + TREND_BEAR)에서는
 더 많은 SHORT 진입 예상.
 
+### Robustness — Monte Carlo (`monte_carlo_backtest.py`)
+
+거래 순서를 10,000회 재배열(shuffle/bootstrap)해 "운이 달랐다면?"을 측정한다.
+헤드라인 백테스트가 숨기는 두 가지를 드러낸다:
+
+| 지표 | 백테스트 헤드라인 | Monte Carlo 현실 기준 |
+|---|---|---|
+| **Max Drawdown** | 6.0% (운 좋은 순서) | 중앙값 **8.6%** · p95 **14.8%** · p99 18% |
+| **총수익** | +137% | p50 +137% · p5 +62% · 손실확률 **0%** |
+| **회복 기간**(신고가까지) | — | 중앙값 **23거래(~4개월)** · p95 52거래(~9개월) · 최악 129거래(~2년) |
+
+**핵심 두 가지 (혼동 주의):**
+- **수익률 위치는 전형적(50th pct)** 이지만, **드로다운은 운이 좋았다(6~12th pct).** →
+  라이브 DD는 6%가 아니라 **중앙값 8.6%, 대비는 p95 14.8%**로 계획할 것.
+- **회복은 느리다.** 손실 후 신고가 회복까지 보통 ~4개월, 나쁘면 9개월~2년.
+  이는 저빈도 전략(49거래/년)의 본질적 특성 — **심리적 인내 기간을 미리 각오**해야 한다.
+  (참고: 공격적 사이징은 회복 *기간*이 아니라 드로다운 *깊이* 와 *파산 위험* 을 키운다.)
+
+```bash
+python3 monte_carlo_backtest.py --plot                    # v10.4 재실행 + 4패널 차트
+python3 monte_carlo_backtest.py --from-json backtest_futures.json --method bootstrap --plot
+```
+
 ---
 
 ## Development
