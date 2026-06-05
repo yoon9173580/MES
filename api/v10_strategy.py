@@ -36,7 +36,7 @@ except ImportError:  # imported as api.v10_strategy from repo root
 ATR_SL_MULT = 1.5            # SL = 1.5 × ATR
 TP_MULT = 2.5               # TP = 2.5 × SL  (v10 lever)
 ATR_MIN = 8.0               # skip days whose 14-day ATR < 8 points
-MIN_SCORE = 68              # v10.4: lowered 74→68 for +18% trade frequency (42→49/yr); annual return unchanged
+MIN_SCORE = 65              # v10.5: lowered 68→65 for +8% trade frequency (49→52/yr); efficient frontier (Sharpe 1.42→1.16, DD 6.0→6.8%)
 VIX_THRESHOLD = 25.0        # below → trend-follow, at/above → mean-reversion
 VIX_SHORT_FILTER = 20.0     # daily-bias SHORT filter: skip SHORT when VIX < this
 VIX_BEAR_MIN = 25.0         # Option B min: ADX-triggered TREND_BEAR only when VIX≥25
