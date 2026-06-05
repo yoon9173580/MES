@@ -141,6 +141,15 @@ v10.1 결과 (score≥88): 2거래, 자본 보존. v10.4 (score≥68 + TREND_BEA
   이는 저빈도 전략(49거래/년)의 본질적 특성 — **심리적 인내 기간을 미리 각오**해야 한다.
   (참고: 공격적 사이징은 회복 *기간*이 아니라 드로다운 *깊이* 와 *파산 위험* 을 키운다.)
 
+**회복 기간은 고칠 수 없다 (실증):** 가장 긴 23거래 언더워터 구간(2025-06~09)을
+trade-by-trade로 분해하면 깊은 폭락이 아니라 **횡보 정체(choppy plateau)** 다 —
+peak 대비 한 번도 −6% 아래로 안 내려가고, 승/패가 번갈아 4개월간 net-flat을 갈다가
+단일 대형 winner(+$516)로 탈출한다. 그래서:
+- **VIX 필터 강화 → 무효.** 승/패 거래 VIX가 동일(17.1 vs 17.5)해 손실 구간을 가려낼 신호가 없다.
+- **연속 손실 후 사이즈 축소(circuit breaker) → 역효과.** maxDD가 6.0%→8.9%로 *악화*된다.
+  정체를 빠져나오게 하는 게 바로 회복 winner인데, 손실 후 사이즈를 줄이면 그 winner까지 줄어든다.
+- **유일한 진짜 레버는 거래 빈도↑** (회복 winner를 더 자주 만남) 이지만 Sharpe가 하락한다 (검증됨).
+
 ```bash
 python3 monte_carlo_backtest.py --plot                    # v10.4 재실행 + 4패널 차트
 python3 monte_carlo_backtest.py --from-json backtest_futures.json --method bootstrap --plot
