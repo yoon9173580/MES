@@ -29,5 +29,20 @@
   },
   "sim_max_drawdown_worst": 21.5,
   "prob_maxdd_gt_15_pct": 2.0,
-  "prob_maxdd_gt_20_pct": 0.1
+  "prob_maxdd_gt_20_pct": 0.1,
+  "recovery_trades": {
+    "50": 22,
+    "75": 29,
+    "95": 42,
+    "99": 55
+  },
+  "recovery_days_approx": {
+    "50": 113.0,
+    "75": 149.0,
+    "95": 216.0,
+    "99": 283.0
+  },
+  "recovery_worst_trades": 82,
+  "recovery_observed_trades": 23,
+  "prob_never_recovered_pct": 68.6
 }
