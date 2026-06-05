@@ -65,3 +65,6 @@ v10_paper_log.json
 v10_state.json
 api/v10_paper_log.json
 api/v10_state.json
+
+# Monte Carlo regenerable artifacts
+monte_carlo_results.png

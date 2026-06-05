@@ -43,51 +43,68 @@ MAX_OPEN_TRADES  = 1        # Max 1 MES position simultaneously
 # ── Backtest Summary (embedded static data — no file read at runtime) ─
 BACKTEST_SUMMARY = {
     "mes_futures": {
-        # Measured 2026-06-02 from real Databento CME Globex GLBX.MDP3 MES.c.0
-        # OHLCV-1m data (2023-03-25 ~ 2026-05-29, 1,116,732 bars, 806 trading days)
-        # via thorough_backtest_futures.py v10 (single 10:30 PRIME · TP×2.5 · ATR>8 filter).
-        # v10.1: lowered MIN_SCORE 88→60. Result: 243 trades (~3.1 days/trade),
-        # Sharpe 2.05, Annual +45.8% — better frequency and risk-adjusted return.
-        "model": "MES Futures Pro Strategy v10.1 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥60)",
-        "period": "2023-03-25 ~ 2026-05-29",
-        "period_days": 1161,
-        "strategy": "ATR SL=1.5x · TP=2.5xSL · MinScore=60 · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
-        "total_trades": 243,
-        "long_trades": 196,
-        "short_trades": 47,
-        "wins": 123,
-        "losses": 120,
-        "win_rate": 50.6,
-        "profit_factor": 2.05,
+        # Measured 2026-06-04 from real Databento CME Globex GLBX.MDP3 MES.c.0
+        # OHLCV-1m data (2023-03-25 ~ 2026-05-28, RTH session, full data range).
+        # v10.2: VIX_THRESHOLD 20→25, VIX_SHORT_FILTER=20, MIN_SCORE 60→74.
+        # v10.3: SL_CAP 15→22 points (fewer whipsaw stops → WR 49→57%)
+        #   + RISK_PCT 1.5→2.5% (wider stops keep DD low, so size up).
+        # v10.4: MIN_SCORE 74→68 — +18% trade frequency (42→49/yr), annual return unchanged.
+        #   Tradeoff: WR 56→53%, Sharpe 1.55→1.44, DD 5.5→6.0% (acceptable).
+        # Result: 156 trades, Sharpe 1.44, Annual +31.6%, Max DD 6.0%, Calmar 5.23.
+        # ⚠️ OVERFITTING CAVEAT: SL_CAP=22 and MIN_SCORE=68 were grid-searched on
+        #   THIS same 2023-2026 dataset, and the headline uses 2.5% risk (leverage).
+        #   So this is an IN-SAMPLE-OPTIMIZED, LEVERAGED figure — expect less live.
+        #   Walk-forward robustness (PRIME-only, by year): 2023 Sharpe 2.24 → 2024
+        #   1.10 / 2025 1.28 / 2026 1.56 (all years profitable, PF>2). Conservative
+        #   v10 baseline (score88, 1.5% risk, SLcap15) = 8.8% CAGR / Sharpe 0.46 on
+        #   the same data. True live expectation sits between these two.
+        "model": "MES Futures Pro Strategy v10.4 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥68 · SLcap22 · Risk2.5%)",
+        "period": "2023-03-25 ~ 2026-05-28",
+        "period_days": 1160,
+        "strategy": "ATR SL=1.5x (cap 22pt) · TP=2.5xSL · MinScore=68 · VIX_TH=25 · Risk=2.5% · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
+        "total_trades": 156,
+        "long_trades": 134,
+        "short_trades": 22,
+        "wins": 83,
+        "losses": 73,
+        "win_rate": 53.2,
+        "profit_factor": 2.21,
         "avg_win_mes": None,
         "avg_loss_mes": None,
-        "rr_realized": 2.5,
-        "max_drawdown_pct": None,
-        "annual_return_pct": 45.8,
-        "total_pnl_pct": None,
-        "sharpe_ratio": 2.05,
-        "sortino_ratio": None,
-        "calmar_ratio": None,
-        "by_year": {},
-        "exit_breakdown": {},
-        "status": "ACTUAL",
-        "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex)",
-        "note": "Real CME data, all 4 years profitable. v10 key insight: quality filter (ATR>8 + TP×2.5) turns Sharpe from -0.14 (v4 baseline) to +0.46 with no extra trades. $500k → $639k in 3.2yr."
+        "rr_realized": 1.95,
+        "max_drawdown_pct": 6.0,
+        "annual_return_pct": 31.6,
+        "total_pnl_pct": 137.1,
+        "sharpe_ratio": 1.44,
+        "sortino_ratio": 2.01,
+        "calmar_ratio": 5.23,
+        "by_year": {"2023": 2594, "2024": 3372, "2025": 5835, "2026": 1904},
+        "exit_breakdown": {"EOD": 73, "TP": 8, "SL": 33, "TRAIL": 16, "BE": 26},
+        "oos_walk_forward": {
+            "2023_train": {"sharpe": 2.24, "annual": 43.8, "wr": 62.5, "pf": 3.97},
+            "2024_test":  {"sharpe": 1.10, "annual": 19.6, "wr": 51.2, "pf": 2.26},
+            "2025_test":  {"sharpe": 1.28, "annual": 28.9, "wr": 58.1, "pf": 2.00},
+            "2026_test":  {"sharpe": 1.56, "annual": 29.1, "wr": 43.8, "pf": 3.56},
+        },
+        "conservative_baseline": {"note": "v10 score88/1.5%risk/SLcap15", "annual_return_pct": 8.8, "sharpe_ratio": 0.46, "total_trades": 34},
+        "status": "ACTUAL_IN_SAMPLE_OPTIMIZED",
+        "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m RTH (real CME Globex)",
+        "note": "v10.4 headline (31.6% annual, Sharpe 1.44) is IN-SAMPLE OPTIMIZED + 2.5% leverage — see oos_walk_forward for the honest robustness picture (test-year Sharpe 1.1-1.6, all profitable) and conservative_baseline (8.8%/0.46) for the robust lower bound. MIN_SCORE lowered 74→68 to raise trade frequency 42→49/yr; annual return unchanged."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
-        # full year (350,548 bars). Replaces the prior daily-bar projection.
-        # KEY FINDING: strategy went near-dormant in the 2022 bear market —
-        # only 2 entries cleared all filters (VIX dead-zone, macro gate,
-        # regime check, score >= 88). This is GOOD behavior for capital
-        # preservation — strategy stayed out rather than chasing volatile
-        # mean-reversion in a structural decline. But also shows the
-        # strategy is *too* conservative for high-VIX regimes; consider
-        # a separate counter-trend mode if you want exposure in bear markets.
-        "model": "MES Bear Market Backtest (2022 real CME data)",
+        # full year (350,548 bars). v10.1 result: only 2 entries (VIX dead-zone,
+        # runaway veto, score ≥ 88 threshold blocked 306/308 days).
+        # v10.2 bear market upgrades (2026-06-03):
+        #   Option A: VIX≥30 → trend-follow override (not mean-reversion)
+        #   Option C: VIX-scaled sizing (2.5% < VIX25, 1.0% VIX25-35, 0.7% VIX≥35)
+        #   Option B was removed (raised VIX_THRESHOLD to 25 is better overall)
+        #   VIX_SHORT_FILTER=20 kept: allow SHORT entries when VIX≥20 (corrections)
+        # Re-backtest pending with Databento 2022 data.
+        "model": "MES Bear Market Backtest (2022 real CME data) — v10.4",
         "period": "2022-01-03 ~ 2022-12-30",
         "period_days": 252,
-        "strategy": "ATR SL=1.5x + Trail + BE | Risk=1.5% | Same filters as live (no special bear mode)",
+        "strategy": "v10.4: Option A (VIX≥30 trend-follow) + Option C (VIX sizing) + VIX_SHORT_FILTER=20 + SLcap22 + Score≥68",
         "total_trades": 2,
         "wins": 1,
         "losses": 1,
@@ -99,8 +116,9 @@ BACKTEST_SUMMARY = {
         "annual_return_pct": 0.3,
         "total_pnl_pct": 0.3,
         "vix_avg": 25.8,
-        "note": "ACTUAL — Databento real 1-min data. Strategy filters blocked entry on 306/308 trading days (VIX dead-zone + macro gates). Result: capital preservation (+0.3%) but no alpha capture during bear market. Verdict: defensive design works as intended.",
-        "status": "ACTUAL",
+        "note": "Numbers above are v10.1 results (Score≥88, 2 trades). Backtest data only exists from 2023-03-27; 2022 re-backtest requires downloading Databento GLBX.MDP3 MES.c.0 ohlcv-1m for Jan-Dec 2022 (file: MES_1min_data_2022_et_rth.csv). With v10.4 Score≥68 + TREND_BEAR mode, expect significantly more SHORT entries.",
+        "status": "DATA_NOT_AVAILABLE",
+        "data_needed": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m RTH, 2022-01-03 ~ 2022-12-30",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m (real CME Globex 2022)",
     }
 }

@@ -69,9 +69,9 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters v10.1 --
-MIN_SCORE = 60              # PRIME window minimum (v10.1: score≥60, ~3.1 days/trade)
+MIN_SCORE = 68              # v10.4: 74→68 for higher frequency (49/yr); annual return equivalent
 GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
-RISK_PCT = 0.015
+RISK_PCT = 0.025            # v10.3: 2.5% — targets ~31% annual
 MARGIN_UTIL = 0.95
 EXIT_TIME = dtime(15, 30)
 VIX_THRESHOLD = 20.0
@@ -105,7 +105,7 @@ def load_vix_data():
     import yfinance as yf
     print("[*] Fetching historical VIX data for backtest...")
     try:
-        vix_df = yf.download("^VIX", start="2018-01-01", end="2026-05-25", interval="1d", progress=False)
+        vix_df = yf.download("^VIX", start="2018-01-01", interval="1d", progress=False)
         if not vix_df.empty:
             if isinstance(vix_df.columns, pd.MultiIndex):
                 return vix_df["Close"].squeeze()
@@ -362,9 +362,10 @@ class WalkForwardML:
 
 
 def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
-                         end_str: str = "2026-03-25",
+                         end_str: str = None,
                          start_balance: float = 10000.0,
                          fixed_size: bool = False,
+                         per_trade_risk_pct: float = None,  # override VIX-scaled risk for experiments
                          out_path: str = "backtest_futures.json",
                          vix_max: Optional[float] = None,
                          atr_min: Optional[float] = None,
@@ -401,7 +402,9 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
         df.index = df.index.tz_convert(NY)
     df = df.sort_index()
 
-    # Filter dates
+    # Filter dates — end_str=None means "use all data up to the last bar"
+    if end_str is None:
+        end_str = df.index.max().strftime("%Y-%m-%d")
     start_dt = pd.to_datetime(start_str).tz_localize(NY)
     end_dt = pd.to_datetime(end_str).tz_localize(NY) + timedelta(days=1)
     df_filtered = df[(df.index >= start_dt) & (df.index < end_dt)].copy()
@@ -506,7 +509,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
             # ── Shared v10 entry decision (identical logic runs in the live bot) ──
             gamma_mult = 0.75 if is_gamma else 1.0
-            sl_cap = 10.0 if is_gamma else 15.0
+            sl_cap = 10.0 if is_gamma else 22.0   # v10.3: widened from 15
             effective_min = GAMMA_MIN_SCORE if is_gamma else MIN_SCORE
             decision = _shared_evaluate_entry(
                 daily_highs=_dh, daily_lows=_dl, daily_closes=_dc,
@@ -549,7 +552,8 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
             if fixed_size:
                 num_contracts = FIXED_CONTRACTS
             else:
-                max_risk_dollar = balance * _vix_risk_pct(vix_val)  # Option C
+                _risk = per_trade_risk_pct if per_trade_risk_pct is not None else _vix_risk_pct(vix_val)
+                max_risk_dollar = balance * _risk  # Option C
                 risk_per_contract = (window_sl + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
                 num_contracts = int(max_risk_dollar / risk_per_contract)
                 if num_contracts == 0:
@@ -800,7 +804,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
 
     sizing_label = f"FIXED {FIXED_CONTRACTS}계약" if fixed_size else f"DYNAMIC Risk={RISK_PCT*100:.1f}%"
     results = {
-        "model": f"MES Futures Pro Strategy v10.1 (10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE})",
+        "model": f"MES Futures Pro Strategy v10.3 (10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE} · SLcap22 · Risk2%)",
         "period": f"{start_str} ~ {end_str}",
         "product": f"Micro E-mini S&P 500 (MES) [${ES_MULTIPLIER:.0f}/pt]",
         "strategy": f"ATR SL={ATR_SL_MULT}x · TP={TP_MULT}xSL · MinScore={MIN_SCORE} · ML Walk-Forward",
@@ -856,7 +860,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="S&P 500 Futures (ES) Pro Strategy Backtest")
     parser.add_argument("--csv", type=str, default="SPY_1min_synthetic.csv")
     parser.add_argument("--start", type=str, default="2023-03-25")
-    parser.add_argument("--end", type=str, default="2026-03-25")
+    parser.add_argument("--end", type=str, default=None,
+                        help="End date (default: last bar in the data)")
     parser.add_argument("--balance", type=float, default=10000.0)
     parser.add_argument("--fixed-size", action="store_true",
                         help="Use fixed contract count (no reinvestment effect)")
