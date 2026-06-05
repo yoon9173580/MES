@@ -78,30 +78,75 @@ def trades_to_returns(trades):
     return np.asarray(rets, dtype=float)
 
 
+def equity_curve(returns, start_balance):
+    """Compound a return sequence into a full equity curve including the start
+    point (length = len(returns) + 1)."""
+    eq = start_balance * np.cumprod(1.0 + returns)
+    return np.concatenate(([start_balance], eq))
+
+
 def equity_curve_and_maxdd(returns, start_balance):
     """Compound a return sequence into an equity curve; return (final_balance,
     max_drawdown_pct over the path including the start point)."""
-    equity = start_balance * np.cumprod(1.0 + returns)
-    equity = np.concatenate(([start_balance], equity))
+    equity = equity_curve(returns, start_balance)
     running_max = np.maximum.accumulate(equity)
     drawdowns = (running_max - equity) / running_max
     return equity[-1], float(drawdowns.max() * 100.0)
 
 
-def monte_carlo(returns, start_balance, iters=10000, method="shuffle", seed=42):
+def longest_underwater_trades(equity):
+    """Recovery-time metric: the longest stretch (in trades) the equity curve
+    spends BELOW a prior peak before making a new high. This is the 'pain
+    duration' — how long you'd wait, in trades, to get back to even after the
+    worst drawdown of the path.
+
+    Returns (longest_underwater, ended_underwater):
+      longest_underwater — max consecutive points strictly below the running max
+      ended_underwater   — True if the path never recovered its final peak
+                           (the run extends to the last trade = censored)."""
+    running_max = np.maximum.accumulate(equity)
+    underwater = equity < running_max               # bool per point
+    max_run = cur = 0
+    for uw in underwater:
+        if uw:
+            cur += 1
+            if cur > max_run:
+                max_run = cur
+        else:
+            cur = 0
+    ended_underwater = bool(underwater[-1])
+    return max_run, ended_underwater
+
+
+def monte_carlo(returns, start_balance, iters=10000, method="shuffle", seed=42,
+                collect_equity=False):
+    """Run the resampling loop. Always returns final_returns, max_dds,
+    recovery_trades (longest underwater stretch per path) and never_recovered
+    (bool per path). If collect_equity, also returns the full equity matrix
+    (iters × n+1) for the fan chart — otherwise that slot is None."""
     rng = np.random.default_rng(seed)
     n = len(returns)
     final_returns = np.empty(iters)
     max_dds = np.empty(iters)
+    recovery_trades = np.empty(iters, dtype=int)
+    never_recovered = np.zeros(iters, dtype=bool)
+    eq_matrix = np.empty((iters, n + 1)) if collect_equity else None
     for i in range(iters):
         if method == "bootstrap":
             sample = rng.choice(returns, size=n, replace=True)
         else:  # shuffle / permutation
             sample = returns[rng.permutation(n)]
-        final_bal, mdd = equity_curve_and_maxdd(sample, start_balance)
-        final_returns[i] = (final_bal - start_balance) / start_balance * 100.0
-        max_dds[i] = mdd
-    return final_returns, max_dds
+        eq = equity_curve(sample, start_balance)
+        running_max = np.maximum.accumulate(eq)
+        dd = (running_max - eq) / running_max
+        final_returns[i] = (eq[-1] - start_balance) / start_balance * 100.0
+        max_dds[i] = float(dd.max() * 100.0)
+        uw, ended = longest_underwater_trades(eq)
+        recovery_trades[i] = uw
+        never_recovered[i] = ended
+        if collect_equity:
+            eq_matrix[i] = eq
+    return final_returns, max_dds, recovery_trades, never_recovered, eq_matrix
 
 
 def pct(arr, q):
@@ -143,13 +188,17 @@ def main():
         sys.exit(1)
 
     # ── Observed (actual) path ────────────────────────────────────────
+    obs_eq = equity_curve(returns, start_balance)
     obs_final_bal, obs_maxdd = equity_curve_and_maxdd(returns, start_balance)
     obs_return = (obs_final_bal - start_balance) / start_balance * 100.0
+    obs_recovery, obs_never = longest_underwater_trades(obs_eq)
 
     # ── Monte Carlo ───────────────────────────────────────────────────
     print(f"[*] Running {args.iters:,} '{args.method}' iterations over {n} trades ...")
-    final_returns, max_dds = monte_carlo(
-        returns, start_balance, iters=args.iters, method=args.method, seed=args.seed)
+    final_returns, max_dds, recovery_trades, never_recovered, eq_matrix = monte_carlo(
+        returns, start_balance, iters=args.iters, method=args.method, seed=args.seed,
+        collect_equity=args.plot)
+    trades_per_year = n / 3.18   # observed sample spans ~3.18 years
 
     # Percentile rank of the OBSERVED result inside the simulated distribution
     obs_dd_rank = float((max_dds < obs_maxdd).mean() * 100.0)   # % of sims with smaller DD
@@ -157,6 +206,13 @@ def main():
     prob_loss = float((final_returns < 0).mean() * 100.0)
     prob_dd_gt_15 = float((max_dds > 15).mean() * 100.0)
     prob_dd_gt_20 = float((max_dds > 20).mean() * 100.0)
+
+    # Recovery-time stats (longest underwater stretch, in trades → approx days)
+    def trades_to_days(t):
+        # ~252 trading days/yr; observed ~trades_per_year trades/yr
+        return t * (252.0 / trades_per_year)
+    prob_never = float(never_recovered.mean() * 100.0)
+    obs_rec_rank = float((recovery_trades < obs_recovery).mean() * 100.0)
 
     # ── Report ────────────────────────────────────────────────────────
     line = "=" * 74
@@ -187,6 +243,20 @@ def main():
     print(f"    worst seen:      {max_dds.max():.1f}%")
     print(f"    P(MaxDD > 15%):  {prob_dd_gt_15:.1f}%")
     print(f"    P(MaxDD > 20%):  {prob_dd_gt_20:.1f}%")
+    print("  " + "-" * 70)
+    print("  RECOVERY TIME — longest underwater stretch (trades → ~days):")
+    print(f"    p50 / p75 / p95 / p99 :  "
+          f"{pct(recovery_trades,50):.0f} / {pct(recovery_trades,75):.0f} / "
+          f"{pct(recovery_trades,95):.0f} / {pct(recovery_trades,99):.0f} trades")
+    print(f"                          (~{trades_to_days(pct(recovery_trades,50)):.0f} / "
+          f"{trades_to_days(pct(recovery_trades,75)):.0f} / "
+          f"{trades_to_days(pct(recovery_trades,95)):.0f} / "
+          f"{trades_to_days(pct(recovery_trades,99)):.0f} calendar days)")
+    print(f"    worst:           {recovery_trades.max():.0f} trades "
+          f"(~{trades_to_days(recovery_trades.max()):.0f} days)")
+    print(f"    observed:        {obs_recovery} trades "
+          f"(~{trades_to_days(obs_recovery):.0f} days), {obs_rec_rank:.0f}th pct")
+    print(f"    P(never recovered by end of sample): {prob_never:.1f}%")
     print("  " + "-" * 70)
     print("  WHERE THE OBSERVED RESULT SITS:")
     print(f"    Observed MaxDD {obs_maxdd:.1f}% is at the {obs_dd_rank:.0f}th percentile "
@@ -219,6 +289,12 @@ def main():
         "sim_max_drawdown_worst": round(float(max_dds.max()), 1),
         "prob_maxdd_gt_15_pct": round(prob_dd_gt_15, 1),
         "prob_maxdd_gt_20_pct": round(prob_dd_gt_20, 1),
+        "recovery_trades": {q: int(pct(recovery_trades, q)) for q in (50, 75, 95, 99)},
+        "recovery_days_approx": {q: round(trades_to_days(pct(recovery_trades, q)), 0)
+                                  for q in (50, 75, 95, 99)},
+        "recovery_worst_trades": int(recovery_trades.max()),
+        "recovery_observed_trades": int(obs_recovery),
+        "prob_never_recovered_pct": round(prob_never, 1),
     }
     with open(args.out, "w") as f:
         json.dump(out, f, indent=2)
@@ -230,27 +306,38 @@ def main():
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        rng = np.random.default_rng(args.seed)
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        x = np.arange(n + 1)
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
 
-        # (1) Equity-curve fan: 200 sample paths + observed
-        ax = axes[0]
-        for _ in range(200):
-            sample = (rng.choice(returns, size=n, replace=True)
-                      if args.method == "bootstrap"
-                      else returns[rng.permutation(n)])
-            eq = start_balance * np.cumprod(1.0 + sample)
-            eq = np.concatenate(([start_balance], eq))
-            ax.plot(eq, color="steelblue", alpha=0.06, linewidth=0.8)
-        obs_eq = start_balance * np.cumprod(1.0 + returns)
-        obs_eq = np.concatenate(([start_balance], obs_eq))
-        ax.plot(obs_eq, color="crimson", linewidth=2.0, label="Observed (actual)")
-        ax.set_title(f"Equity-curve fan — {args.iters:,} {args.method} paths (200 shown)")
+        # (A) FAN CHART — percentile bands of equity across all paths ------
+        ax = axes[0, 0]
+        # eq_matrix: (iters × n+1). Percentiles along the path axis at each step.
+        p5, p25, p50, p75, p95 = (np.percentile(eq_matrix, q, axis=0)
+                                  for q in (5, 25, 50, 75, 95))
+        ax.fill_between(x, p5, p95, color="steelblue", alpha=0.18, label="p5–p95")
+        ax.fill_between(x, p25, p75, color="steelblue", alpha=0.35, label="p25–p75")
+        ax.plot(x, p50, color="navy", linewidth=1.6, label="median (p50)")
+        ax.plot(x, obs_eq, color="crimson", linewidth=2.0, label="Observed (actual)")
+        ax.set_title(f"Fan chart — equity percentile bands ({args.iters:,} {args.method} paths)")
         ax.set_xlabel("Trade #"); ax.set_ylabel("Balance ($)")
+        ax.legend(loc="upper left"); ax.grid(alpha=0.3)
+
+        # (B) RECOVERY-TIME histogram — longest underwater stretch ---------
+        ax = axes[0, 1]
+        ax.hist(recovery_trades, bins=40, color="darkseagreen", alpha=0.85)
+        ax.axvline(obs_recovery, color="crimson", linewidth=2,
+                   label=f"Observed {obs_recovery} tr (~{trades_to_days(obs_recovery):.0f}d)")
+        ax.axvline(pct(recovery_trades, 95), color="orange", linestyle="--",
+                   label=f"p95 {pct(recovery_trades,95):.0f} tr "
+                         f"(~{trades_to_days(pct(recovery_trades,95)):.0f}d)")
+        ax.axvline(pct(recovery_trades, 99), color="darkred", linestyle="--",
+                   label=f"p99 {pct(recovery_trades,99):.0f} tr")
+        ax.set_title("Recovery time — longest underwater stretch (trades)")
+        ax.set_xlabel("Trades spent below prior peak"); ax.set_ylabel("Frequency")
         ax.legend(); ax.grid(alpha=0.3)
 
-        # (2) Max-DD histogram with observed + p95/p99 markers
-        ax = axes[1]
+        # (2) Max-DD histogram --------------------------------------------
+        ax = axes[1, 0]
         ax.hist(max_dds, bins=60, color="slategray", alpha=0.8)
         ax.axvline(obs_maxdd, color="crimson", linewidth=2,
                    label=f"Observed {obs_maxdd:.1f}%")
@@ -262,7 +349,20 @@ def main():
         ax.set_xlabel("Max drawdown (%)"); ax.set_ylabel("Frequency")
         ax.legend(); ax.grid(alpha=0.3)
 
-        fig.suptitle("MES v10.4 — Trade-Shuffling Monte Carlo", fontsize=13, fontweight="bold")
+        # (3) Total-return histogram --------------------------------------
+        ax = axes[1, 1]
+        ax.hist(final_returns, bins=60, color="mediumpurple", alpha=0.8)
+        ax.axvline(obs_return, color="crimson", linewidth=2,
+                   label=f"Observed {obs_return:+.0f}%")
+        ax.axvline(pct(final_returns, 5), color="orange", linestyle="--",
+                   label=f"p5 {pct(final_returns,5):+.0f}%")
+        ax.axvline(0, color="black", linewidth=1)
+        ax.set_title("Total-return distribution")
+        ax.set_xlabel("Total return (%)"); ax.set_ylabel("Frequency")
+        ax.legend(); ax.grid(alpha=0.3)
+
+        fig.suptitle(f"MES v10.4 — Trade-Shuffling Monte Carlo ({args.method})",
+                     fontsize=14, fontweight="bold")
         fig.tight_layout()
         png = "monte_carlo_results.png"
         fig.savefig(png, dpi=110, bbox_inches="tight")
