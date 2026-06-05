@@ -365,6 +365,7 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
                          end_str: str = None,
                          start_balance: float = 10000.0,
                          fixed_size: bool = False,
+                         per_trade_risk_pct: float = None,  # override VIX-scaled risk for experiments
                          out_path: str = "backtest_futures.json",
                          vix_max: Optional[float] = None,
                          atr_min: Optional[float] = None,
@@ -551,7 +552,8 @@ def run_futures_backtest(csv_path: str, start_str: str = "2023-03-25",
             if fixed_size:
                 num_contracts = FIXED_CONTRACTS
             else:
-                max_risk_dollar = balance * _vix_risk_pct(vix_val)  # Option C
+                _risk = per_trade_risk_pct if per_trade_risk_pct is not None else _vix_risk_pct(vix_val)
+                max_risk_dollar = balance * _risk  # Option C
                 risk_per_contract = (window_sl + ES_SLIPPAGE_PTS * 2) * ES_MULTIPLIER + ES_COMMISSION_RT
                 num_contracts = int(max_risk_dollar / risk_per_contract)
                 if num_contracts == 0:
