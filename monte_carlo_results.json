@@ -1,0 +1,33 @@
+{
+  "model": "MES v10.4 trade-shuffling Monte Carlo",
+  "method": "shuffle",
+  "iterations": 10000,
+  "trades": 156,
+  "start_balance": 10000.0,
+  "observed": {
+    "total_return_pct": 137.1,
+    "max_drawdown_pct": 6.0,
+    "maxdd_percentile_rank": 6.1,
+    "return_percentile_rank": 76.6
+  },
+  "sim_total_return_pct": {
+    "5": 137.1,
+    "25": 137.1,
+    "50": 137.1,
+    "75": 137.1,
+    "95": 137.1
+  },
+  "sim_total_return_mean": 137.1,
+  "prob_total_loss_pct": 0.0,
+  "sim_max_drawdown_pct": {
+    "5": 5.9,
+    "25": 7.3,
+    "50": 8.5,
+    "75": 10.2,
+    "95": 13.3,
+    "99": 16.2
+  },
+  "sim_max_drawdown_worst": 21.5,
+  "prob_maxdd_gt_15_pct": 2.0,
+  "prob_maxdd_gt_20_pct": 0.1
+}
