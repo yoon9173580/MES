@@ -69,7 +69,7 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters v10.1 --
-MIN_SCORE = 74              # PRIME window minimum (v10.2: score≥74, optimised)
+MIN_SCORE = 68              # v10.4: 74→68 for higher frequency (49/yr); annual return equivalent
 GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
 RISK_PCT = 0.025            # v10.3: 2.5% — targets ~31% annual
 MARGIN_UTIL = 0.95
