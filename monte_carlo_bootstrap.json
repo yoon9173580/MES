@@ -1,48 +1,48 @@
 {
-  "model": "MES v10.4 trade-shuffling Monte Carlo",
+  "model": "MES v10.5 trade-shuffling Monte Carlo",
   "method": "bootstrap",
   "iterations": 10000,
-  "trades": 156,
+  "trades": 161,
   "start_balance": 10000.0,
   "observed": {
-    "total_return_pct": 137.1,
-    "max_drawdown_pct": 6.0,
-    "maxdd_percentile_rank": 11.5,
-    "return_percentile_rank": 50.2
+    "total_return_pct": 98.0,
+    "max_drawdown_pct": 6.8,
+    "maxdd_percentile_rank": 16.2,
+    "return_percentile_rank": 50.4
   },
   "sim_total_return_pct": {
-    "5": 61.7,
-    "25": 102.0,
-    "50": 136.9,
-    "75": 178.4,
-    "95": 251.8
+    "5": 37.4,
+    "25": 70.9,
+    "50": 97.5,
+    "75": 128.9,
+    "95": 185.7
   },
-  "sim_total_return_mean": 143.9,
-  "prob_total_loss_pct": 0.0,
+  "sim_total_return_mean": 102.8,
+  "prob_total_loss_pct": 0.07,
   "sim_max_drawdown_pct": {
-    "5": 5.4,
-    "25": 7.0,
-    "50": 8.6,
-    "75": 10.7,
-    "95": 14.8,
-    "99": 18.3
+    "5": 5.6,
+    "25": 7.4,
+    "50": 9.1,
+    "75": 11.4,
+    "95": 15.9,
+    "99": 20.3
   },
-  "sim_max_drawdown_worst": 31.7,
-  "prob_maxdd_gt_15_pct": 4.4,
-  "prob_maxdd_gt_20_pct": 0.5,
+  "sim_max_drawdown_worst": 33.2,
+  "prob_maxdd_gt_15_pct": 6.9,
+  "prob_maxdd_gt_20_pct": 1.1,
   "recovery_trades": {
-    "50": 23,
-    "75": 31,
-    "95": 52,
-    "99": 73
+    "50": 28,
+    "75": 39,
+    "95": 66,
+    "99": 94
   },
   "recovery_days_approx": {
-    "50": 118.0,
-    "75": 159.0,
-    "95": 267.0,
-    "99": 375.0
+    "50": 139.0,
+    "75": 194.0,
+    "95": 329.0,
+    "99": 468.0
   },
-  "recovery_worst_trades": 129,
-  "recovery_observed_trades": 23,
-  "prob_never_recovered_pct": 69.1
+  "recovery_worst_trades": 160,
+  "recovery_observed_trades": 19,
+  "prob_never_recovered_pct": 73.6
 }
