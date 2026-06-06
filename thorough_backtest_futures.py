@@ -69,7 +69,7 @@ ES_SLIPPAGE_PTS = 0.25     # 1 tick slippage per side
 ES_DAY_MARGIN = 50.0       # Day-trading margin per MES contract
 
 # -- Strategy Parameters v10.1 --
-MIN_SCORE = 65              # v10.5: 68→65 for higher frequency (52/yr); efficient frontier (Sharpe>1.1)
+MIN_SCORE = 65              # v10.6: kept 65; GAMMA 14:00 창 추가로 실질 빈도↑ (52→71/yr)
 GAMMA_MIN_SCORE = 83        # GAMMA window minimum (scores naturally lower at 14:00)
 RISK_PCT = 0.025            # v10.3: 2.5% — targets ~31% annual
 MARGIN_UTIL = 0.95
@@ -887,7 +887,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # ── profile overrides ──
-    if args.profile in ("v4", "v10"):
+    if args.profile == "v4":
         ENTRY_WINDOWS = [dtime(10, 30)]   # single PRIME entry only
         MAX_TRADES_PER_DAY = 1            # one high-conviction trade per day
         LOCKOUT_STRIKES = 3               # stricter 3-strike lockout
@@ -896,10 +896,16 @@ if __name__ == "__main__":
         WalkForwardML.SKIP_THRESH = 0.43
 
     if args.profile == "v10":
-        # v10.1: TP×2.5 and MIN_SCORE=60 are now the module-level defaults.
+        # v10.6: PRIME 10:30 + GAMMA 14:00 (score≥83), max 2 trades/day
+        ENTRY_WINDOWS = [dtime(10, 30), dtime(14, 0)]
+        MAX_TRADES_PER_DAY = 2
+        LOCKOUT_STRIKES = 3
+        LOCKOUT_DAYS = 1
+        WalkForwardML.SKIP_AFTER_N = 9999
+        WalkForwardML.SKIP_THRESH = 0.43
         if args.atr_min is None:
             args.atr_min = 8.0
-        print(f"[*] PROFILE: v10.1 — 10:30 PRIME · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE}")
+        print(f"[*] PROFILE: v10.6 — 10:30 PRIME + 14:00 GAMMA(≥83) · TP×{TP_MULT} · ATR>8 · Score≥{MIN_SCORE}")
     elif args.profile == "v4":
         print("[*] PROFILE: v4 — narrow 10:30 PRIME only, legacy defaults")
 
