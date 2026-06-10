@@ -1,7 +1,7 @@
 # 인수인계 문서 (HANDOFF) — MES Futures Signal Engine
 
 > 이 문서는 이 작업 환경(터미널 머신)과 프로젝트를 **다른 AI나 사람이 처음 봐도 이어받을 수 있도록** 정리한 것이다.
-> 최종 갱신: 2026-06-10 / 전략 버전: **v10.5**
+> 최종 갱신: 2026-06-10 / 전략 버전: **v10.6**
 
 ---
 
@@ -9,8 +9,8 @@
 
 - **무엇:** MES(Micro E-mini S&P 500 선물) 데이트레이딩 **시그널/페이퍼 트레이딩 봇**.
 - **전략:** 하루 1회, 미국장 **10:30 ET(PRIME) 단일 진입**. 7-레이어 스코어가 **65점 이상 + ML hard-skip**일 때만 진입. EOD(15:30 ET) 청산. 저빈도·고확신.
-- **현재 성과(v10.5 백테스트, 2023-03~2026-05 전체, RTH, $10k 시작):** 승률 62.1%, 연수익 26.8%, Sharpe 1.42, MaxDD 6.6%, 95거래(~30/yr).
-  - ⚠️ **과최적화·레버리지 주의:** `MIN_SCORE=65`·`SL_CAP=22`는 이 데이터로 그리드서치했고, 헤드라인은 2.5% 리스크(레버리지). 2025-2026은 outlier 장세(Sharpe 3~5). **현실 기대치 = 2023-2024: Sharpe 0.78~1.58, CAGR 19~31%**. 보수적 구버전(score88·1.5%·SLcap15)은 같은 데이터에서 **8.8%/Sharpe 0.46**. (§3, §8 참조)
+- **현재 성과(v10.6 백테스트, 2023-03~2026-05 전체, RTH, $10k 시작):** 승률 57.9%, 연수익 79.0%, Sharpe 2.32, MaxDD 6.9%, 171거래(~55/yr, 월 ~4.5건).
+  - ⚠️ **과최적화·레버리지 주의:** `MIN_SCORE=65`·`SL_CAP=22`·`SKIP_THRESH=0.35`는 이 데이터로 튜닝했고, 헤드라인은 2.5% 리스크(레버리지). 2025-2026은 outlier 장세(Sharpe 3~4). **현실 기대치 = 2023-2024: Sharpe ~1.6, CAGR 38~41%**. 보수적 구버전(score88·1.5%·SLcap15)은 같은 데이터에서 **8.8%/Sharpe 0.46**. (§3, §8 참조)
 - **배포:** 프론트+API는 **Vercel** (`https://hannaealgo.vercel.app`), 스케줄러는 **Vercel Cron**, 상태/로그는 **Upstash Redis(KV)**.
 - **핵심 원칙:** 백테스트(`thorough_backtest_futures.py`)와 라이브 봇(`api/v10_runner.py`)이 **동일한 의사결정 모듈(`api/v10_strategy.py`)을 import** → "백테스트가 곧 라이브"가 보장됨.
 
@@ -50,11 +50,11 @@
 
 ---
 
-## 3. 전략 v10.5 (현재 운영중) — 핵심 규칙
+## 3. 전략 v10.6 (현재 운영중) — 핵심 규칙
 
 **진입 (하루 최대 1회):**
 1. 시간: **10:30 ET PRIME 바**만 평가 (단일 진입). 오후 GAMMA 창은 v10에서 사실상 미사용.
-2. 7-레이어 스코어 ≥ **MIN_SCORE = 68** 이어야 진입.
+2. 7-레이어 스코어 ≥ **MIN_SCORE = 65** 이어야 진입. ML hard-skip: 학습 30건 이후 P(win) < 0.35면 차단.
 3. 변동성 필터: 14일 ATR ≥ **8 포인트**.
 4. **Runaway veto**(과열 차단, 대칭형): ADX≥40, 또는 RSI≥90/≤10, 또는 전 섹터 동반 급등/급락이면 진입 거부.
 5. **Daily-bias 필터**: 일봉 상승추세인데 VIX<20이면 SHORT 스킵(`VIX_SHORT_FILTER=20`).
@@ -74,12 +74,12 @@
   - 25–35 → 1.0% / VIX≥35 → 0.7%
 - 3-strike 락아웃: 연속 손실 누적 시 1일 쿨다운.
 
-### v10.5 핵심 상수 (단일 출처: `api/v10_strategy.py` 35~66행)
+### v10.6 핵심 상수 (단일 출처: `api/v10_strategy.py` 35~66행)
 ```python
 ATR_SL_MULT     = 1.5      # SL = 1.5×ATR
 TP_MULT         = 2.5      # TP = 2.5×SL
 ATR_MIN         = 8.0      # 14일 ATR 하한
-MIN_SCORE       = 65       # 진입 스코어 임계값  ★ (v10.5: 68→65 + ML hard-skip ON)
+MIN_SCORE       = 65       # 진입 스코어 임계값  ★ (v10.5: 68→65; v10.6: ML SKIP_THRESH 0.43→0.35)
 VIX_THRESHOLD   = 25.0     # 추세↔평균회귀 전환  ★
 VIX_SHORT_FILTER= 20.0     # SHORT 스킵 기준
 VIX_CRISIS      = 30.0     # 위기장 추세추종 override
@@ -204,7 +204,8 @@ python -c "import sys; sys.path.insert(0,'api'); import v10_strategy, v10_runner
 | v10.2 | VIX_TH 20→25, VIX_SHORT_FILTER 신설, MIN_SCORE→74 | 49%/15.6%/1.01 |
 | v10.3 | SL_CAP 15→22, RISK_PCT 1.5→2.5% | 57%/31.8%/1.57 |
 | v10.4 | MIN_SCORE 74→68 (+18% 거래빈도, 42→49/yr) | 53%/31.6%/1.44 |
-| **v10.5** | **MIN_SCORE 68→65 + ML hard-skip 복원(SKIP_N=30)** | **62%/26.8%/1.42 · 95거래(~30/yr)** |
+| v10.5 | MIN_SCORE 68→65 + ML hard-skip 복원(SKIP_N=30) | 62%/26.8%/1.42 · 95거래(~30/yr) |
+| **v10.6** | **ML SKIP_THRESH 0.43→0.35 (barely-rejected 거래 허용; 전 연도 Sharpe 개선)** | **58%/79.0%/2.32 · 171거래(~55/yr)** |
 
 - **베어마켓 보강(2022)**: Option A(VIX≥30 추세추종)+Option C(VIX 사이징) 적용. Option B(ADX 트렌드베어)와 direction-aware veto는 **MEAN_REVERSION과 방향 충돌 버그**로 제거/롤백 → **대칭형 veto 유지**.
 - `bear_market_2022` 상태: `DATA_NOT_AVAILABLE` — 2022 Databento 데이터 미보유. `MES_1min_data_2022_et_rth.csv` 다운로드 후 재백테스트 필요.

@@ -1,12 +1,12 @@
 """
-Trade-Shuffling Monte Carlo for MES Futures Backtest (v10.5)
+Trade-Shuffling Monte Carlo for MES Futures Backtest (v10.6)
 
 Robustness test that answers: "Was the observed equity curve lucky, and how bad
 could the drawdown realistically get if the SAME trades arrived in a different
 order?"
 
 Method (the standard serious-retail-quant approach):
-  1. Take the realized trade list from the v10.5 backtest.
+  1. Take the realized trade list from the v10.6 backtest.
   2. Convert each trade to a RETURN on equity (pnl / balance_before_trade) so the
      shuffle is position-sizing-correct (a +$500 win on a $10k balance is a
      different *return* than the same $500 on a $20k balance — shuffling raw
@@ -29,7 +29,7 @@ Interpretation:
     for a low-frequency strategy like this (~49 trades/yr).
 
 Usage:
-  python3 monte_carlo_backtest.py                       # run v10.5 backtest, then MC
+  python3 monte_carlo_backtest.py                       # run v10.6 backtest, then MC
   python3 monte_carlo_backtest.py --from-json backtest_futures.json
   python3 monte_carlo_backtest.py --iters 20000 --method bootstrap --plot
 """
@@ -48,15 +48,16 @@ def load_trades_from_json(path):
 
 
 def run_v104_backtest(csv_path, start_balance):
-    """Run the live v10.5 profile (single 10:30 PRIME entry, score>=65) and
+    """Run the live v10.6 profile (single 10:30 PRIME entry, score>=65) and
     return its trade list — single source of truth with the live bot."""
     from datetime import time as dtime
     import thorough_backtest_futures as _bt
 
-    _bt.MIN_SCORE = 68
+    _bt.MIN_SCORE = 65
     _bt.MAX_TRADES_PER_DAY = 1
     _bt.ENTRY_WINDOWS = [dtime(10, 30)]
-    _bt.WalkForwardML.SKIP_AFTER_N = 9999
+    _bt.WalkForwardML.SKIP_AFTER_N = 30
+    _bt.WalkForwardML.SKIP_THRESH = 0.35
     r = _bt.run_futures_backtest(
         csv_path=csv_path, start_str="2023-03-25", end_str=None,
         start_balance=start_balance, out_path="backtest_futures.json",
@@ -154,7 +155,7 @@ def pct(arr, q):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Trade-shuffling Monte Carlo (v10.5)")
+    ap = argparse.ArgumentParser(description="Trade-shuffling Monte Carlo (v10.6)")
     ap.add_argument("--csv", default="MES_1min_data_et_rth.csv")
     ap.add_argument("--from-json", default=None,
                     help="Skip backtest; load trades from this results JSON")
@@ -177,7 +178,7 @@ def main():
         if not os.path.exists(args.csv):
             print(f"ERROR: {args.csv} not found")
             sys.exit(1)
-        print(f"[*] Running v10.5 backtest on {args.csv} ...")
+        print(f"[*] Running v10.6 backtest on {args.csv} ...")
         trades, start_balance = run_v104_backtest(args.csv, args.balance)
         print(f"[*] Backtest produced {len(trades)} trades")
 
@@ -217,7 +218,7 @@ def main():
     # ── Report ────────────────────────────────────────────────────────
     line = "=" * 74
     print("\n" + line)
-    print("  TRADE-SHUFFLING MONTE CARLO — MES v10.5")
+    print("  TRADE-SHUFFLING MONTE CARLO — MES v10.6")
     print(line)
     print(f"  Trades:            {n}   (~{n/3.18:.0f}/yr)")
     print(f"  Iterations:        {args.iters:,}  ({args.method})")
@@ -271,7 +272,7 @@ def main():
     print(line)
 
     out = {
-        "model": "MES v10.5 trade-shuffling Monte Carlo",
+        "model": "MES v10.6 trade-shuffling Monte Carlo",
         "method": args.method,
         "iterations": args.iters,
         "trades": n,
@@ -361,7 +362,7 @@ def main():
         ax.set_xlabel("Total return (%)"); ax.set_ylabel("Frequency")
         ax.legend(); ax.grid(alpha=0.3)
 
-        fig.suptitle(f"MES v10.5 — Trade-Shuffling Monte Carlo ({args.method})",
+        fig.suptitle(f"MES v10.6 — Trade-Shuffling Monte Carlo ({args.method})",
                      fontsize=14, fontweight="bold")
         fig.tight_layout()
         png = "monte_carlo_results.png"

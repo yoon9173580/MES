@@ -893,7 +893,7 @@ if __name__ == "__main__":
         LOCKOUT_STRIKES = 3               # stricter 3-strike lockout
         LOCKOUT_DAYS = 1                  # 1-day cooldown after lockout
         WalkForwardML.SKIP_AFTER_N = 30    # v10.5: ML hard-skip ON (filters low-confidence entries)
-        WalkForwardML.SKIP_THRESH = 0.43
+        WalkForwardML.SKIP_THRESH = 0.35   # v10.6: 0.43→0.35 — admit "barely-rejected" trades (+78% frequency)
 
     if args.profile == "v10":
         # v10.1: TP×2.5 and MIN_SCORE=60 are now the module-level defaults.
