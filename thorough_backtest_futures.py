@@ -892,7 +892,7 @@ if __name__ == "__main__":
         MAX_TRADES_PER_DAY = 1            # one high-conviction trade per day
         LOCKOUT_STRIKES = 3               # stricter 3-strike lockout
         LOCKOUT_DAYS = 1                  # 1-day cooldown after lockout
-        WalkForwardML.SKIP_AFTER_N = 9999  # disable ML skip — score-purity over filter noise
+        WalkForwardML.SKIP_AFTER_N = 30    # v10.5: ML hard-skip ON (filters low-confidence entries)
         WalkForwardML.SKIP_THRESH = 0.43
 
     if args.profile == "v10":
