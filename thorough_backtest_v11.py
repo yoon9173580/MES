@@ -41,7 +41,8 @@ START_BALANCE = 10_000.0
 SLIPPAGE_PTS  = 0.25         # per side, in MES points
 COMMISSION    = 0.62         # $ per contract per side (round-trip = 1.24)
 SL_CAP        = 22.0         # max SL in MES points (tunable via --sl-cap)
-RISK_PCT      = 0.020        # base risk per trade (tunable via --risk-pct)
+RISK_PCT      = 0.030        # base risk per trade (tunable via --risk-pct)
+MAX_RISK_PCT  = 0.060        # max sizing cap per trade (tunable via --max-risk-pct)
 
 PRIME_TIME    = dtime(10, 30)
 OR_START      = dtime(9, 30)
@@ -746,7 +747,7 @@ def run_backtest(
         sl_pts = float(np.clip(1.5 * atr14, 2.0, SL_CAP))
         risk_dollar   = balance * RISK_PCT
         base_contracts = max(1, int(risk_dollar / (sl_pts * PNL_PER_POINT)))
-        max_contracts  = max(1, int((balance * 0.06) / (sl_pts * PNL_PER_POINT)))
+        max_contracts  = max(1, int((balance * MAX_RISK_PCT) / (sl_pts * PNL_PER_POINT)))
 
         size_mult  = ml.size_multiplier(p_win)
         contracts  = min(round(base_contracts * size_mult), max_contracts)
@@ -925,7 +926,7 @@ def run_backtest(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
-    global SL_CAP, RISK_PCT
+    global SL_CAP, RISK_PCT, MAX_RISK_PCT
     parser = argparse.ArgumentParser(
         description="MES Futures v11.0 — Walk-Forward ML Backtest"
     )
@@ -938,21 +939,24 @@ def main():
     parser.add_argument("--end",     default=None,         help="End date YYYY-MM-DD")
     parser.add_argument("--balance", type=float, default=START_BALANCE,
                         help="Starting balance in USD")
-    parser.add_argument("--entry-thresh", type=float, default=0.60,
+    parser.add_argument("--entry-thresh", type=float, default=0.52,
                         help="ML P(win) threshold for entry")
     parser.add_argument("--warmup",  type=int, default=25,
                         help="Number of trades before ML gate activates")
     parser.add_argument("--sl-cap",  type=float, default=SL_CAP,
                         help="Max SL in MES points (default 22)")
     parser.add_argument("--risk-pct", type=float, default=RISK_PCT,
-                        help="Base risk per trade as fraction of balance (default 0.025)")
+                        help="Base risk per trade as fraction of balance (default 0.030)")
+    parser.add_argument("--max-risk-pct", type=float, default=MAX_RISK_PCT,
+                        help="Max sizing cap per trade as fraction of balance (default 0.060)")
     parser.add_argument("--out",     default="backtest_v11.json",
                         help="Output JSON file path")
     args = parser.parse_args()
 
     # Apply tunable globals from CLI
-    SL_CAP   = args.sl_cap
-    RISK_PCT = args.risk_pct
+    SL_CAP       = args.sl_cap
+    RISK_PCT     = args.risk_pct
+    MAX_RISK_PCT = args.max_risk_pct
 
     # ── Load CSV ──────────────────────────────────────────────────────────────
     csv_path = args.csv
