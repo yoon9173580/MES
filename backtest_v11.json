@@ -1,6 +1,6 @@
 {
   "model": "MES Futures v11.0 \u2014 ML Scoring (OR breakout, 22 features)",
-  "period": "2023-03-27 to 2026-06-19",
+  "period": "2023-03-27 to 2026-06-22",
   "product": "MES $5/pt",
   "strategy": "WalkForward LightGBM \u00b7 P(win)\u22650.52 \u00b7 OR breakout \u00b7 ATR SL \u00b7 10:30 PRIME",
   "total_trades": 160,
@@ -10,16 +10,16 @@
   "win_rate": 0.4813,
   "profit_factor": 1.5583,
   "rr_ratio": 1.6798,
-  "annual_return": 21.79,
+  "annual_return": 21.73,
   "max_drawdown": 0.1281,
   "sharpe_ratio": 2.5992,
   "sortino_ratio": 5.3015,
-  "calmar_ratio": 1.7015,
+  "calmar_ratio": 1.6968,
   "start_balance": 10000.0,
   "end_balance": 18906.66,
   "total_pnl": 8906.66,
   "pnl_pct": 89.07,
-  "years": 3.2307,
+  "years": 3.2389,
   "yearly_pnl": {
     "2023": 598.46,
     "2024": 2513.05,
@@ -52,7 +52,7 @@
   },
   "ml_stats": {
     "warmup_trades": 25,
-    "ml_filtered": 650,
+    "ml_filtered": 651,
     "ml_passed": 135
   },
   "trades": [
