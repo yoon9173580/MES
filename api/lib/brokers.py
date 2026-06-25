@@ -285,8 +285,9 @@ class DryRunAdapter(BrokerAdapter):
         return list(self._positions)
 
     def place_bracket_order(self, symbol, qty, side, take_profit, stop_loss):
+        from datetime import datetime, timezone
         order = {
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "symbol": symbol, "qty": qty, "side": side,
             "tp": take_profit, "sl": stop_loss,
             "mode": "DRYRUN",

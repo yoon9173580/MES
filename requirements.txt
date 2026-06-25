@@ -1,4 +1,13 @@
+# Runtime (Vercel / live bot)
 pandas
 numpy
 pytz
 requests
+
+# Optional / backtest research (not required for live cron)
+# scikit-learn
+# lightgbm
+# tqdm
+
+# Dev / test
+# pytest

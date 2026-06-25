@@ -73,7 +73,7 @@ Deployed at https://hannaealgo.vercel.app (Google SSO required).
 | Metric                  | Value      | Note                        |
 |-------------------------|-----------:|-----------------------------|
 | Total trades            | 171        | ~55/yr (~4.5/mo)            |
-| Win rate                | 57.9%      | ML hard-skip (THRESH=0.35)  |
+| Win rate                | 57.9%      | (backtest includes ML hard-skip; live = score gate + adaptive weights) |
 | Profit factor           | **3.13**   |                             |
 | R:R realized            | 2.28       | TP=2.5×SL asymmetry         |
 | **Annual return (CAGR)**| **79.0%**  | ⚠️ in-sample optimized + 2.5% risk |
@@ -85,13 +85,11 @@ All 4 calendar years profitable (P&L on $10k acct):
 2023 +$931 · 2024 +$4,991 · 2025 +$17,467 · 2026 +$27,676
 
 > ⚠️ **Overfitting caveat — read this before trusting the headline.**
-> `MIN_SCORE=65`, `SL_CAP=22`, `SKIP_THRESH=0.35` were **tuned on this same
-> 2023–2026 dataset**, and the headline uses **2.5% risk-per-trade** (pure
-> leverage). So 79.0% / Sharpe 2.32 is an **in-sample-optimized, leveraged**
-> figure — expect less live. 2025–2026 was an anomalously favourable regime
-> (Sharpe 3–4 each year standalone). Realistic baseline = **2023–2024:
-> Sharpe ~1.6, CAGR 38–41%**. Year-by-year (score=65, ML-skip THRESH=0.35,
-> each year run fresh):
+> `MIN_SCORE=65`, `SL_CAP=22` were tuned on this same 2023–2026 dataset.
+> The headline backtest numbers also include the ML classifier hard-skip (SKIP_THRESH=0.35)
+> which is applied **only during backtest validation**. Live execution uses the
+> score gate + adaptive layer weights (ml_weights). 2.5% risk is leveraged.
+> Expect less than the in-sample 79% / 2.32 Sharpe. Realistic baseline ≈ 2023-2024.
 >
 > | Year | Trades | WR | Annual | Sharpe | MaxDD |
 > |---|--:|--:|--:|--:|--:|
@@ -116,7 +114,7 @@ All 4 calendar years profitable (P&L on $10k acct):
 |---|---|---|
 | TP target | 1.5×SL | **2.5×SL** |
 | ATR filter | none | **ATR > 8 pts/day** |
-| ML skip | on (SKIP_N=25, THRESH=0.43) | **on (SKIP_N=30, THRESH=0.35)** |
+| ML skip (classifier) | on in backtest only | on in backtest only (live uses adaptive weights) |
 | Entry window | PRIME only | PRIME only (same) |
 | Score threshold | 88 | **65** (grid-searched; 68→65 for +freq) |
 | SL cap | 15 pt | **22 pt** (grid-searched) |

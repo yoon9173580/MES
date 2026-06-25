@@ -49,20 +49,26 @@ V10_STATE_FILE = "v10_state.json"
 V10_LOG_FILE = "v10_paper_log.json"
 V10_LOG_CAP = 1000
 
-# Entry-decision parameters live in api/v10_strategy.py (shared with the
-# backtest). These are kept only for the order-sizing math below, which must
-# match thorough_backtest_futures.py's contract sizing.
-ES_PER_SPY = 10.0
-ES_MULTIPLIER = 5.0        # $5 per point (MES — Micro E-mini)
-ES_COMMISSION_RT = 0.50
-ES_SLIPPAGE_PTS = 0.25
-ES_DAY_MARGIN = 50.0
-RISK_PCT = 0.015
+# All authoritative entry & sizing parameters come from v10_constants (via v10_strategy).
+# These local names are kept only for back-compat with older callers (trading_bot.py etc).
+try:
+    from .v10_constants import (
+        ES_PER_SPY, ES_MULTIPLIER, ES_COMMISSION_RT, ES_SLIPPAGE_PTS, ES_DAY_MARGIN,
+        TP_MULT as V10_TP_MULT,
+        MIN_SCORE as V10_MIN_SCORE,
+        ATR_SL_MULT as V10_SL_ATR_MULT,
+    )
+except ImportError:
+    from api.v10_constants import (
+        ES_PER_SPY, ES_MULTIPLIER, ES_COMMISSION_RT, ES_SLIPPAGE_PTS, ES_DAY_MARGIN,
+        TP_MULT as V10_TP_MULT,
+        MIN_SCORE as V10_MIN_SCORE,
+        ATR_SL_MULT as V10_SL_ATR_MULT,
+    )
 MARGIN_UTIL = 0.95
-# Back-compat re-exports (trading_bot.py imports these names)
-V10_MIN_SCORE = 60
-V10_TP_MULT = 2.5
-V10_SL_ATR_MULT = 1.5
+
+# Note: Live uses vix-scaled risk (RISK_PCT_FULL etc) inside vix_risk_pct + runner sizing.
+# The old flat RISK_PCT=0.015 is no longer the primary live value.
 
 
 # ── Pluggable persistence ────────────────────────────────────────────────────
@@ -205,6 +211,27 @@ def run_once_entry(now=None, store=None):
         return {"action": "NO_DATA", "reason": ctx.get("reason")}
 
     decision = evaluate_entry(**inputs)
+
+    # Record ML context (adaptive weights). Hard-skip classifier is backtest-only.
+    try:
+        try:
+            from .v10_strategy import get_live_ml_context, should_apply_live_ml_skip
+        except ImportError:
+            from api.v10_strategy import get_live_ml_context, should_apply_live_ml_skip
+        ml_ctx = get_live_ml_context()
+        skip, skip_reason = should_apply_live_ml_skip(decision, ml_ctx)
+        if skip:
+            decision["enter"] = False
+            decision.setdefault("reasons", []).append(f"ml_hard_skip: {skip_reason}")
+        decision["ml_context"] = {
+            "confidence": ml_ctx.get("confidence"),
+            "sample_count": ml_ctx.get("sample_count"),
+            "skip_checked": True,
+            "skip_reason": skip_reason,
+        }
+    except Exception:
+        decision["ml_context"] = {"confidence": "ERROR", "skip_checked": False}
+
     log_base = {"date": today, "ts": now.isoformat(), "score": decision["score"],
                 "atr": decision["atr"], "spy": ctx["spy_price"], "vix": ctx["vix"]}
 

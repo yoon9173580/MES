@@ -20,6 +20,15 @@ try:
     from lib.feature_flags import all_flags as _feature_flags_snapshot
     from lib.health import snapshot as _health_snapshot, log_error, log_warn
     from engines.ic_signal import evaluate_ic_signal as _evaluate_ic_signal
+
+    # Live entry gate (authoritative for paper bot)
+    from v10_strategy import evaluate_entry as _v10_evaluate_entry
+    from v10_constants import (
+        MIN_SCORE as _V10_MIN_SCORE,
+        ATR_MIN as _V10_ATR_MIN,
+        SL_CAP_PTS as _V10_SL_CAP,
+        TP_MULT as _V10_TP_MULT,
+    )
 except Exception as e:
     import traceback
     INIT_ERROR = traceback.format_exc()
@@ -29,16 +38,19 @@ except Exception as e:
 STARTING_BALANCE = 500000.0
 TRADING_START_DATE = "2026-05-25"   # Day 1 of MES futures paper trading
 
-# MES Futures Contract Specs
-ES_MULTIPLIER    = 5.0      # $5/pt (Micro E-mini S&P 500)
-ES_COMMISSION_RT = 0.50     # Round-trip commission per contract
-ES_SLIPPAGE_PTS  = 0.25     # 1 tick slippage per side
-ES_DAY_MARGIN    = 50.0     # Day-trading margin per contract
-ES_TICK_SIZE     = 0.25     # Minimum price increment
-ATR_SL_MULT      = 1.5      # SL = 1.5x ATR proxy (range-based)
-RISK_PCT         = 0.015    # 1.5% Kelly-informed risk per trade
-DAILY_LOSS_LIMIT = 0.06     # Halt trading if daily drawdown > 6%
-MAX_OPEN_TRADES  = 1        # Max 1 MES position simultaneously
+# MES Futures Contract Specs (dashboard simulation / legacy paper path)
+# NOTE: The authoritative live values live in api/v10_constants.py
+#       (vix-scaled risk, SL_CAP 22, MIN_SCORE 65, TP 2.5x, etc.)
+ES_MULTIPLIER    = 5.0
+ES_COMMISSION_RT = 0.50
+ES_SLIPPAGE_PTS  = 0.25
+ES_DAY_MARGIN    = 50.0
+ES_TICK_SIZE     = 0.25
+ATR_SL_MULT      = 1.5
+# Old flat risk kept for the internal simulated paper portfolio UI only
+RISK_PCT         = 0.015
+DAILY_LOSS_LIMIT = 0.06
+MAX_OPEN_TRADES  = 1
 
 # ── Backtest Summary (embedded static data — no file read at runtime) ─
 BACKTEST_SUMMARY = {
@@ -54,10 +66,10 @@ BACKTEST_SUMMARY = {
         #   2025-2026 was an unusually favourable regime (Sharpe 3-4 standalone).
         #   True live expectation closer to 2023-2024 baseline: Sharpe ~1.6,
         #   CAGR ~38-41%. Only 3 years / 171 trades — extend data before trusting.
-        "model": "MES Futures Pro Strategy v10.6 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥65 · ML-skip 0.35 · SLcap22 · Risk2.5%)",
+        "model": "MES Futures Pro Strategy v10.6 (10:30 PRIME · TP×2.5 · ATR>8 · Score≥65 · SLcap22 · Risk2.5% VIX-scaled). ML *classifier hard-skip* used only in backtest validation for reported numbers; live uses adaptive layer weights (ml_weights) + score gate.",
         "period": "2023-03-25 ~ 2026-05-29",
         "period_days": 1161,
-        "strategy": "ATR SL=1.5x (cap 22pt) · TP=2.5xSL · MinScore=65 · ML hard-skip (SKIP_AFTER_N=30, THRESH=0.35) · VIX_TH=25 · Risk=2.5% · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout",
+        "strategy": "ATR SL=1.5x (cap 22pt) · TP=2.5xSL · MinScore=65 · VIX_TH=25 · Risk VIX-scaled 2.5%/1%/0.7% · 10:30 PRIME entry · ATR>8 filter · 3-strike lockout. (ML classifier hard-skip is backtest-only for these headline metrics; live uses ml adaptive weights.)",
         "total_trades": 171,
         "long_trades": 158,
         "short_trades": 13,
@@ -86,7 +98,7 @@ BACKTEST_SUMMARY = {
         "conservative_baseline": {"note": "v10 score88/1.5%risk/SLcap15", "annual_return_pct": 8.8, "sharpe_ratio": 0.46, "total_trades": 34},
         "status": "ACTUAL_IN_SAMPLE_OPTIMIZED",
         "data_source": "Databento GLBX.MDP3 MES.c.0 ohlcv-1m RTH (real CME Globex)",
-        "note": "v10.6 headline (79.0% CAGR, Sharpe 2.32) is IN-SAMPLE OPTIMISED + 2.5% leverage. 2025-2026 was anomalously good (Sharpe 3-4 standalone). Honest baseline = 2023-2024: Sharpe ~1.6, CAGR 38-41%. SKIP_THRESH 0.43→0.35 improved Sharpe in all 4 years (key robustness signal). Data extension to 10yr+ is the priority improvement."
+        "note": "v10.6 headline (79.0% CAGR, Sharpe 2.32) is IN-SAMPLE OPTIMISED + 2.5% leverage and includes ML classifier hard-skip filter (backtest only). Live execution uses score gate + adaptive layer weights (no loss-prob classifier loaded to keep serverless light). Honest baseline = 2023-2024: Sharpe ~1.6, CAGR 38-41%. Data extension to 10yr+ is the priority improvement."
     },
     "bear_market_2022": {
         # Measured 2026-05-25 from real Databento MES.c.0 ohlcv-1m, 2022
@@ -2588,6 +2600,14 @@ class handler(BaseHTTPRequestHandler):
                 "paper_trading_stats": paper_trading_stats,
                 "portfolio_heat": portfolio_heat,
                 "tail_risk": tail_risk,
+                # v10 live entry gate (single source of truth for cron/paper bot)
+                "v10_live_gate": {
+                    "min_score": _V10_MIN_SCORE,
+                    "atr_min": _V10_ATR_MIN,
+                    "sl_cap_pts": _V10_SL_CAP,
+                    "tp_mult": _V10_TP_MULT,
+                    "note": "This is the gate actually used by the live paper-trading cron. Dashboard 'total_score' + grades are richer research view.",
+                },
                 "entry_diagnostic": {
                     "passed": entry_passed,
                     "reason": entry_reason,

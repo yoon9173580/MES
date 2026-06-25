@@ -59,6 +59,14 @@ from v10_strategy import (
     manage_bar as _shared_manage_bar,
     vix_risk_pct as _vix_risk_pct,
 )
+from v10_constants import (
+    MIN_SCORE as V10_MIN_SCORE,
+    ATR_MIN as V10_ATR_MIN,
+    TP_MULT as V10_TP_MULT,
+    SL_CAP_PTS as V10_SL_CAP,
+    RISK_PCT_FULL as V10_RISK_PCT_FULL,
+    # add more as needed for profiles
+)
 
 NY = pytz.timezone("America/New_York")
 

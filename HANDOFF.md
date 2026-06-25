@@ -8,7 +8,8 @@
 ## 0. TL;DR (30초 요약)
 
 - **무엇:** MES(Micro E-mini S&P 500 선물) 데이트레이딩 **시그널/페이퍼 트레이딩 봇**.
-- **전략:** 하루 1회, 미국장 **10:30 ET(PRIME) 단일 진입**. 7-레이어 스코어가 **65점 이상 + ML hard-skip**일 때만 진입. EOD(15:30 ET) 청산. 저빈도·고확신.
+- **전략:** 하루 1회, 미국장 **10:30 ET(PRIME) 단일 진입**. 스코어 **65점 이상**. EOD(15:30 ET) 청산. 저빈도·고확신.
+  (ML classifier hard-skip은 백테스트 검증에서만 사용; 라이브는 adaptive layer weights + 점수 게이트 사용)
 - **현재 성과(v10.6 백테스트, 2023-03~2026-05 전체, RTH, $10k 시작):** 승률 57.9%, 연수익 79.0%, Sharpe 2.32, MaxDD 6.9%, 171거래(~55/yr, 월 ~4.5건).
   - ⚠️ **과최적화·레버리지 주의:** `MIN_SCORE=65`·`SL_CAP=22`·`SKIP_THRESH=0.35`는 이 데이터로 튜닝했고, 헤드라인은 2.5% 리스크(레버리지). 2025-2026은 outlier 장세(Sharpe 3~4). **현실 기대치 = 2023-2024: Sharpe ~1.6, CAGR 38~41%**. 보수적 구버전(score88·1.5%·SLcap15)은 같은 데이터에서 **8.8%/Sharpe 0.46**. (§3, §8 참조)
 - **배포:** 프론트+API는 **Vercel** (`https://hannaealgo.vercel.app`), 스케줄러는 **Vercel Cron**, 상태/로그는 **Upstash Redis(KV)**.
@@ -54,7 +55,8 @@
 
 **진입 (하루 최대 1회):**
 1. 시간: **10:30 ET PRIME 바**만 평가 (단일 진입). 오후 GAMMA 창은 v10에서 사실상 미사용.
-2. 7-레이어 스코어 ≥ **MIN_SCORE = 65** 이어야 진입. ML hard-skip: 학습 30건 이후 P(win) < 0.35면 차단.
+2. 7-레이어(또는 v10 축소) 스코어 ≥ **MIN_SCORE = 65** 이어야 진입.
+   ML hard-skip (P(win) 필터)은 thorough_backtest_futures 내부 WalkForwardML에서만 적용 (헤드라인 숫자 생성용). 라이브는 ml_weights adaptive + 게이트.
 3. 변동성 필터: 14일 ATR ≥ **8 포인트**.
 4. **Runaway veto**(과열 차단, 대칭형): ADX≥40, 또는 RSI≥90/≤10, 또는 전 섹터 동반 급등/급락이면 진입 거부.
 5. **Daily-bias 필터**: 일봉 상승추세인데 VIX<20이면 SHORT 스킵(`VIX_SHORT_FILTER=20`).
@@ -79,7 +81,7 @@
 ATR_SL_MULT     = 1.5      # SL = 1.5×ATR
 TP_MULT         = 2.5      # TP = 2.5×SL
 ATR_MIN         = 8.0      # 14일 ATR 하한
-MIN_SCORE       = 65       # 진입 스코어 임계값  ★ (v10.5: 68→65; v10.6: ML SKIP_THRESH 0.43→0.35)
+MIN_SCORE       = 65       # 진입 스코어 임계값  ★ (v10.6 기준; ML hard-skip은 백테스트 전용)
 VIX_THRESHOLD   = 25.0     # 추세↔평균회귀 전환  ★
 VIX_SHORT_FILTER= 20.0     # SHORT 스킵 기준
 VIX_CRISIS      = 30.0     # 위기장 추세추종 override
@@ -205,7 +207,7 @@ python -c "import sys; sys.path.insert(0,'api'); import v10_strategy, v10_runner
 | v10.3 | SL_CAP 15→22, RISK_PCT 1.5→2.5% | 57%/31.8%/1.57 |
 | v10.4 | MIN_SCORE 74→68 (+18% 거래빈도, 42→49/yr) | 53%/31.6%/1.44 |
 | v10.5 | MIN_SCORE 68→65 + ML hard-skip 복원(SKIP_N=30) | 62%/26.8%/1.42 · 95거래(~30/yr) |
-| **v10.6** | **ML SKIP_THRESH 0.43→0.35 (barely-rejected 거래 허용; 전 연도 Sharpe 개선)** | **58%/79.0%/2.32 · 171거래(~55/yr)** |
+| **v10.6** | ML SKIP (백테스트 전용) + score≥65 + TP×2.5 + ATR>8 + VIX sizing | **58%/79.0%/2.32 · 171거래 (백테스트 기준)** |
 
 - **베어마켓 보강(2022)**: Option A(VIX≥30 추세추종)+Option C(VIX 사이징) 적용. Option B(ADX 트렌드베어)와 direction-aware veto는 **MEAN_REVERSION과 방향 충돌 버그**로 제거/롤백 → **대칭형 veto 유지**.
 - `bear_market_2022` 상태: `DATA_NOT_AVAILABLE` — 2022 Databento 데이터 미보유. `MES_1min_data_2022_et_rth.csv` 다운로드 후 재백테스트 필요.
@@ -216,7 +218,7 @@ python -c "import sys; sys.path.insert(0,'api'); import v10_strategy, v10_runner
 
 1. **백테스트=라이브 동기화가 생명.** 상수는 `api/v10_strategy.py`에만 두고, 백테스트/러너는 그걸 import해야 한다. 한쪽만 바꾸면 라이브가 발행 성과와 달라진다. (단, 백테스트의 `sl_cap`은 509행에서 한 번 더 명시적으로 22를 넘기므로 함께 맞춰야 함.)
 2. **로컬 상태파일 ≠ 프로덕션.** `v10_state.json`/`v10_paper_log.json`의 `{"test":true}`류 내용은 무시. 진짜는 KV.
-3. **"무진입"은 대개 정상.** 평균 8거래일에 1회(전체 날의 ~13%만 진입), 과거 최장 46거래 무신호. 보통 사유는 `score < 65` 또는 ML hard-skip. 이벤트(NFP/CPI/FOMC) 직전엔 변동성↓로 스코어가 더 낮게 나옴.
+3. **"무진입"은 대개 정상.** 평균 8거래일에 1회(전체 날의 ~13%만 진입), 과거 최장 46거래 무신호. 보통 사유는 `score < 65` 또는 런어웨이/매크로/리스크 게이트. (ML hard-skip은 백테스트 전용) 이벤트 직전엔 변동성↓로 스코어가 더 낮게 나옴.
 4. **시크릿은 프로덕션에만.** 이 컨테이너에서 라이브 재현/ KV조회 불가. 필요하면 사용자가 키를 주입하거나 Vercel/Upstash 콘솔에서 확인.
 5. **"Sharpe 2.05" 옛 표기 오류 주의.** 과거 `data.py`에 Sharpe=profit_factor로 잘못 표기된 흔적이 있었음. 실제 Sharpe는 백테스트 코드 공식 기준(현재 v10.3=1.56).
 6. **MEAN_REVERSION은 강세장에서 해롭다.** 2023-26 데이터에선 순수 추세추종이 더 나음. VIX_THRESHOLD를 25로 올려 평균회귀 구간을 축소한 이유.
@@ -241,6 +243,9 @@ git log --oneline -3                  # main이 v10.3(c7e538d)인지
 python -m pytest tests/ -q            # 108 passed 확인
 python thorough_backtest_futures.py --csv MES_1min_data_et_rth.csv \
   | grep -E "Win Rate|Annual|Sharpe|Max Draw"   # 57.4/31.6/1.56/5.8 확인
-grep -E "^MIN_SCORE|^SL_CAP_PTS|^RISK_PCT_FULL|^VIX_THRESHOLD" api/v10_strategy.py
+python -c "
+from api.v10_constants import MIN_SCORE, SL_CAP_PTS, RISK_PCT_FULL, VIX_THRESHOLD
+print(MIN_SCORE, SL_CAP_PTS, RISK_PCT_FULL, VIX_THRESHOLD)
+"
 ```
 값이 위 표와 일치하면 정상. 라이브 점검은 https://hannaealgo.vercel.app 대시보드의 "진입 대기" 줄(오늘/5일 최고 스코어 vs 74)로.

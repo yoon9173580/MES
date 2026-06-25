@@ -21,49 +21,42 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 try:
+    from .v10_constants import (
+        ATR_SL_MULT, TP_MULT, ATR_MIN, MIN_SCORE,
+        VIX_THRESHOLD, VIX_SHORT_FILTER, VIX_CRISIS, VIX_SIZE_25, VIX_SIZE_35,
+        RISK_PCT_FULL, RISK_PCT_BEAR, RISK_PCT_CRISIS,
+        RSI_UPPER, RSI_LOWER, ADX_RUNAWAY, SECTOR_THRESHOLD,
+        NR7_SCORE_BOOST, PULLBACK_SCORE_BOOST,
+        SL_MIN_PTS, SL_CAP_PTS,
+        ENTRY_TIME, EXIT_TIME,
+        TRAILING_ACTIVATION, TRAILING_STEP, BREAKEVEN_AT, ES_SLIPPAGE_PTS,
+        ES_MULTIPLIER, ES_COMMISSION_RT, ES_DAY_MARGIN, ES_PER_SPY,
+        ML_SKIP_AFTER_N, ML_SKIP_THRESH,
+    )
     from engines.regime import calculate_regime_score
     from engines.correlation import calculate_correlation_score
     from engines.time_window import calculate_time_score
     from engines.technical import calculate_technical_score
-except ImportError:  # imported as api.v10_strategy from repo root
+except ImportError:  # imported as api.v10_strategy from repo root or direct
+    from api.v10_constants import (
+        ATR_SL_MULT, TP_MULT, ATR_MIN, MIN_SCORE,
+        VIX_THRESHOLD, VIX_SHORT_FILTER, VIX_CRISIS, VIX_SIZE_25, VIX_SIZE_35,
+        RISK_PCT_FULL, RISK_PCT_BEAR, RISK_PCT_CRISIS,
+        RSI_UPPER, RSI_LOWER, ADX_RUNAWAY, SECTOR_THRESHOLD,
+        NR7_SCORE_BOOST, PULLBACK_SCORE_BOOST,
+        SL_MIN_PTS, SL_CAP_PTS,
+        ENTRY_TIME, EXIT_TIME,
+        TRAILING_ACTIVATION, TRAILING_STEP, BREAKEVEN_AT, ES_SLIPPAGE_PTS,
+        ES_MULTIPLIER, ES_COMMISSION_RT, ES_DAY_MARGIN, ES_PER_SPY,
+        ML_SKIP_AFTER_N, ML_SKIP_THRESH,
+    )
     from api.engines.regime import calculate_regime_score
     from api.engines.correlation import calculate_correlation_score
     from api.engines.time_window import calculate_time_score
     from api.engines.technical import calculate_technical_score
 
-
-# ── v10 strategy constants (mirror thorough_backtest_futures.py v10 profile) ──
-ATR_SL_MULT = 1.5            # SL = 1.5 × ATR
-TP_MULT = 2.5               # TP = 2.5 × SL  (v10 lever)
-ATR_MIN = 8.0               # skip days whose 14-day ATR < 8 points
-MIN_SCORE = 65              # v10.6: ML hard-skip ON (SKIP_AFTER_N=30, THRESH=0.35) → 171 trades, Sharpe 2.32
-VIX_THRESHOLD = 25.0        # below → trend-follow, at/above → mean-reversion
-VIX_SHORT_FILTER = 20.0     # daily-bias SHORT filter: skip SHORT when VIX < this
-VIX_BEAR_MIN = 25.0         # Option B min: ADX-triggered TREND_BEAR only when VIX≥25
-VIX_CRISIS = 30.0           # Option A: crisis bear → override back to trend-follow
-ADX_BEAR_TREND = 25.0       # Option B: trending bear (VIX_BEAR_MIN≤VIX<30 + ADX>25) → trend-follow
-ADX_RUNAWAY = 40.0
-# Option C: VIX-based position sizing
-VIX_SIZE_25 = 25.0
-VIX_SIZE_35 = 35.0
-RISK_PCT_FULL = 0.025       # VIX < 25 (v10.3: 2.5% — targets ~31% annual)
-RISK_PCT_BEAR = 0.010       # 25 ≤ VIX < 35
-RISK_PCT_CRISIS = 0.007     # VIX ≥ 35
-RSI_UPPER = 90.0
-RSI_LOWER = 10.0
-SECTOR_THRESHOLD = 1.8
-NR7_SCORE_BOOST = 5
-PULLBACK_SCORE_BOOST = 5
-SL_MIN_PTS = 2.0
-SL_CAP_PTS = 22.0           # v10.3: widened from 15 — fewer whipsaw stops, higher WR
-ENTRY_TIME = dtime(10, 30)  # single PRIME entry
-EXIT_TIME = dtime(15, 30)   # EOD flatten
-
-# Intraday exit management (mirror thorough_backtest_futures.py)
-TRAILING_ACTIVATION = 0.5   # arm trailing once profit ≥ 0.5×ATR
-TRAILING_STEP = 0.25        # trail at best − 0.25×ATR
-BREAKEVEN_AT = 0.25         # move stop to breakeven once profit ≥ 0.25×ATR
-ES_SLIPPAGE_PTS = 0.25      # 1-tick slippage cushion at breakeven
+# Re-export for consumers that expect module-level names (keeps backward compat)
+# All values now come from v10_constants.py (single source of truth).
 
 
 def vix_risk_pct(vix):
@@ -382,3 +375,41 @@ def evaluate_entry(
         "tp_points": round(window_sl * tp_mult, 4),
     })
     return out
+
+
+# =============================================================================
+# Live ML integration note (solves doc vs impl gap #2)
+# =============================================================================
+def get_live_ml_context():
+    """Return current ML state for live path (adaptive weights only).
+
+    The full WalkForwardML classifier hard-skip (P(win) < 0.35 after N samples)
+    exists only inside thorough_backtest_futures.py for generating the
+    published backtest metrics. Live deliberately avoids heavy ML deps
+    (sklearn/lightgbm) and model artifacts.
+
+    We surface the adaptive ml_weights stats so the runner / UI can show
+    confidence (COLD_START / WARMING_UP / TRUSTED) and future extensions
+    can add a soft/hard gate here.
+    """
+    try:
+        from .engines.ml_weights import get_ml_stats
+        return get_ml_stats()
+    except Exception:
+        return {"confidence": "UNAVAILABLE", "sample_count": 0}
+
+
+def should_apply_live_ml_skip(decision: dict, stats: dict | None = None) -> tuple[bool, str]:
+    """Future hook. Currently returns (False, reason) — no hard block in live.
+
+    For strict parity with backtest numbers you would load a persisted
+    classifier here and check stats['sample_count'] >= ML_SKIP_AFTER_N and
+    predicted_p_win < ML_SKIP_THRESH.
+    """
+    if stats is None:
+        stats = get_live_ml_context()
+    n = stats.get("sample_count", 0)
+    if n < ML_SKIP_AFTER_N:
+        return False, f"ML warm-up (n={n} < {ML_SKIP_AFTER_N})"
+    # No classifier loaded in this runtime → never hard-skip here.
+    return False, "ML hard-skip not active in live path (backtest-only filter)"

@@ -26,7 +26,9 @@ from engines.macro_gate import calculate_macro_gate
 from engines.options_flow import calculate_options_flow_score
 
 
-# ── Signal Grade Thresholds (loaded from env for security / easy tuning) ──
+# ── Signal Grade Thresholds (Dashboard UI only) ──
+# These control the pretty labels (STRONG / MODERATE) shown in the rich dashboard.
+# The *hard entry gate* for the live paper bot is MIN_SCORE from v10_constants (default 65).
 import os
 GRADE_STRONG   = int(os.getenv("GRADE_STRONG", "90"))
 GRADE_MODERATE = int(os.getenv("GRADE_MODERATE", "75"))
@@ -200,10 +202,15 @@ def run_score_engine(now_et: datetime,
     runaway_reason = ""
 
     # 1. ADX Runaway check (both modes)
+    # Use the same default as v10 production gate when possible.
+    try:
+        from ..v10_constants import ADX_RUNAWAY as _ADX_RUNAWAY
+    except Exception:
+        _ADX_RUNAWAY = 40.0
     adx_val = layers["regime"].get("details", {}).get("adx", {}).get("value")
-    if adx_val is not None and adx_val >= 35.0:
+    if adx_val is not None and adx_val >= _ADX_RUNAWAY:
         is_runaway_trend = True
-        runaway_reason = f"Extreme ADX ({adx_val:.1f} >= 35.0)"
+        runaway_reason = f"Extreme ADX ({adx_val:.1f} >= {_ADX_RUNAWAY})"
 
     # 2. RSI Runaway check — trending mode only
     rsi_val = layers["technical"].get("rsi")

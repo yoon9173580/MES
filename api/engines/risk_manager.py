@@ -1,6 +1,11 @@
 """
-LAYER 7 — Risk Management & Position Sizing
-이기는 시그널보다 크게 잃지 않는 구조가 장기 생존의 핵심.
+LAYER 7 — Risk Management & Position Sizing (Dashboard / score_engine view)
+
+This implements the rich UI risk layer (3-strike, daily DD, trade counts).
+The *live paper bot* (v10_runner + v10_strategy) uses its own state machine +
+vix_risk_pct + the 3-strike logic recorded in KV state.
+
+See api/v10_constants.py and api/v10_runner.py for the production risk numbers.
 """
 from datetime import datetime
 import pytz
@@ -92,7 +97,7 @@ def calculate_position_size(portfolio: dict, signal_grade: str, entry_price: flo
     cash = portfolio.get("cash", 0)
     initial = portfolio.get("initial_balance", 500000.0)
     
-    # 1.5% risk rule (from Alpaca optimized backtest)
+    # Dashboard sim only. Live bot uses vix-scaled risk from v10_constants (up to 2.5%).
     RISK_PCT = 0.015
     max_risk = initial * RISK_PCT
 
